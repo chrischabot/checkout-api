@@ -14,13 +14,12 @@ function resumeSession(raw) {
 }
 
 function refreshAccessToken(session, tokenService) {
-  const auth = (session && session.auth) || newAuthState();
-  const refreshToken = auth.refreshToken;
+  const refreshToken = session.auth.refreshToken;
   if (!refreshToken) {
     return { ok: false, reason: 'no_refresh_token', session };
   }
   const next = tokenService.exchange(refreshToken);
-  session.auth = { ...auth, ...next };
+  session.auth = { ...session.auth, ...next };
   return { ok: true, session };
 }
 
