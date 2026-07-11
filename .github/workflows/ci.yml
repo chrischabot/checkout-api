@@ -72,3 +72,25 @@ jobs:
 
       - name: Run the INC-12 divergence gate (proves the step above is not redundant)
         run: python3 artifacts/incident/verify_inc12_ci_runs_verifier.py
+
+      # INC-15 (Fabric autonomous incident commander).
+      #
+      # The INC-9 verifier's cross-fleet gates (G6a/G6b/G6c) re-confirm, BY
+      # EXECUTING THE DEPLOYED SOURCE, that the three owner-blocked billing
+      # defects (INC-6/INC-5/INC-8) are still live. Its sibling discovery looked
+      # for directories named `incident-target/` and `gateway/`; the real repos
+      # are `fabric-ic-incident-target` and `fabric-gateway-demo`. The lookup
+      # never matched in ANY environment, so those three gates were unreachable
+      # dead code -- and the skip path folded them into a confident "6/6 passed".
+      #
+      # A skip laundered into a pass count is worse than a missing check: it
+      # asserts coverage it does not have. This step guards the repair, so the
+      # INC-15 fix cannot itself rot into decoration.
+      #
+      # NOTE on the bare checkout: CI clones only this repo, so the sibling
+      # fleet repos are legitimately absent here. The verifier is
+      # environment-aware -- its cross-fleet gates report SKIPPED (never a pass,
+      # never a hard failure) in that case, so this step is NOT permanently red.
+      # That was the INC-11 bug and is deliberately not re-committed.
+      - name: Run the INC-15 cross-fleet discovery gate (a skip must never count as a pass)
+        run: python3 artifacts/incident/verify_inc15_cross_fleet_discovery.py
