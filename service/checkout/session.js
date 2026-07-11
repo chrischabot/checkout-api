@@ -14,7 +14,10 @@ function resumeSession(raw) {
 }
 
 function refreshAccessToken(session, tokenService) {
-  const refreshToken = session.auth.refreshToken;
+  // The cold-cache resume path (added alongside the session-lookup cache) can
+  // yield a session whose `auth` blob is absent/null. Reading `.refreshToken`
+  // straight off it throws TypeError before the no_refresh_token check runs.
+  const refreshToken = session.auth && session.auth.refreshToken;
   if (!refreshToken) {
     return { ok: false, reason: 'no_refresh_token', session };
   }
