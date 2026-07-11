@@ -1,0 +1,4 @@
+# The incident-commander verifier under artifacts/incident/ is Python; keep its
+# compiled bytecode out of the repo.
+__pycache__/
+*.py[cod]

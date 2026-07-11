@@ -1,0 +1,44 @@
+# Fabric autonomous incident commander - INC-9 (run 2026-07-11).
+#
+# WHY THIS EXISTS
+#
+# This repo already carries a real, passing, 10-test regression suite on `main`
+# (`test/session.test.js`, merged in PR #3). Its assertions provably fail on the
+# INC-1 cold-cache auth defect - the commander re-verified that this run by
+# reintroducing the defect and watching the suite go red.
+#
+# But NOTHING EXECUTED IT. No workflow file existed in this repo, so the guard
+# was dead code: a regression test that never runs is decoration.
+#
+# That is precisely how INC-1 reached production. PR #1 ("perf: cache session
+# lookups") changed `refreshAccessToken()` to read `session.auth.refreshToken`
+# directly while adding a cold-cache resume path that yields `auth: null`, and
+# it merged with no test executing against the path it changed.
+#
+# Every incident this fleet has produced followed the same shape: a PR changed a
+# code path that no test executed. This workflow closes that hole for the one
+# repo that already has the guard written.
+#
+# SAFETY: no production source is touched. No dependency is added - the suite is
+# zero-dependency (`node:test`), so there is nothing to install.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: session regression suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run the session regression suite
+        run: npm test
