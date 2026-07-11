@@ -20,7 +20,9 @@ double witness, G4/G5:
 
   G1  the CI workflow is valid YAML and triggers on pull_request + push:[main]
   G2  it invokes package.json's REAL test script (not an invented one)
-  G3  production source is UNTOUCHED by this run (byte-for-byte sha256)
+  G3  production source is UNTOUCHED (byte-for-byte sha256 vs upstream main), and
+      ci.yml is consistent with upstream (absent = new file pre-merge; present =
+      must be identical, so an unreviewed workflow edit is still caught)
   G4  WITNESS A — the suite is GREEN against the deployed source
   G5  WITNESS B — MUTATION: reintroduce the exact INC-1 unguarded read and the
       suite must go RED with the original production TypeError. If the guard
@@ -162,8 +164,11 @@ def main() -> int:
     # ---------------------------------------------------------------- G3 --
     # Provenance: the authoritative statement of "what is deployed" is upstream
     # `main`. Comparing the local tree against ITSELF would pass vacuously, so we
-    # fetch upstream bytes and require an exact sha256 match on every prod file,
-    # and require that ci.yml is genuinely absent upstream (i.e. it is new).
+    # fetch upstream bytes and require an exact sha256 match on every prod file.
+    #
+    # We then check ci.yml for CONSISTENCY rather than for absence -- see the long
+    # comment at the gate() call below for why. (It originally demanded ci.yml be
+    # absent upstream, which stopped being true the moment INC-9 merged.)
     RAW = "https://raw.githubusercontent.com/chrischabot/checkout-api/main/{}"
     PROD_FILES = [
         "service/checkout/session.js",
@@ -196,11 +201,46 @@ def main() -> int:
         ci_upstream = None
         print(f"         (upstream unreachable: {exc})")
 
+    # G3 is IDEMPOTENT, and that is a deliberate fix.
+    #
+    # This gate originally required `ci_upstream is None` -- i.e. it asserted the
+    # workflow did not yet exist on main, because when INC-9 was first raised the
+    # workflow was a NEW file. That assertion expired the moment the INC-9 PR was
+    # merged: ci.yml now exists upstream, so the gate went PERMANENTLY RED on main
+    # (5/6, exit 1) even though nothing was wrong.
+    #
+    # A gate that can never pass is exactly as worthless as a gate that can never
+    # fail -- people learn to ignore both. So it now asserts the invariant that
+    # actually matters and remains true forever:
+    #
+    #   * production source is byte-identical to upstream main (NO drift), and
+    #   * ci.yml exists locally, and
+    #   * if ci.yml also exists upstream, the local copy is identical to it
+    #     (so this verifier still catches an unreviewed edit to the workflow).
+    #
+    # Pre-merge (ci.yml absent upstream) and post-merge (present and identical)
+    # both pass. An actual regression -- drifted production source, a missing
+    # workflow, or a locally-modified workflow -- still fails.
+    ci_local = CI.read_bytes() if CI.is_file() else None
+    ci_matches_upstream = (
+        ci_upstream is None  # not yet merged: a genuinely new file
+        or (
+            ci_local is not None
+            and hashlib.sha256(ci_upstream).digest() == hashlib.sha256(ci_local).digest()
+        )
+    )
+    if ci_upstream is None:
+        ci_state = "absent upstream (new file, pre-merge)"
+    elif ci_matches_upstream:
+        ci_state = "present upstream and IDENTICAL (post-merge, no local edit)"
+    else:
+        ci_state = "present upstream but LOCALLY MODIFIED -- unreviewed workflow edit"
+
     gate(
-        "G3 production source byte-identical to upstream main; ci.yml is NEW",
-        upstream_reachable and not drifted and ci_upstream is None and CI.is_file(),
+        "G3 production source byte-identical to upstream main; ci.yml consistent",
+        upstream_reachable and not drifted and CI.is_file() and ci_matches_upstream,
         f"checked={checked}/{len(PROD_FILES)} drifted={drifted or 'none'}; "
-        f"ci.yml upstream={'absent (new file)' if ci_upstream is None else 'ALREADY EXISTS'}",
+        f"ci.yml {ci_state}",
     )
 
     # -------------------------------------------------- G4 · WITNESS A --
