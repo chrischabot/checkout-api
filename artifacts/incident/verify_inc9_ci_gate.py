@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import shutil
@@ -311,31 +312,111 @@ def main() -> int:
     # or not be present at all (a plain checkout of checkout-api). Search every
     # plausible sibling location; if they genuinely are not here, SKIP explicitly
     # rather than reporting a vacuous pass.
+    # INC-13 REPAIR — this gate was DEAD, and it hid that fact behind a green exit.
+    #
+    # The discovery below used to look for sibling directories literally named
+    # `incident-target` and `gateway`. The fleet repos are actually named
+    # `fabric-ic-incident-target` and `fabric-gateway-demo`. So the lookup never
+    # matched, G6 ALWAYS took the SKIP path, and G6a/G6b/G6c never executed --
+    # in ANY environment, including the commander workspace this verifier claims
+    # to be designed for. Three of the nine gates were unreachable code.
+    #
+    # Worse than being dead: the SKIP path counted only the gates that HAD run
+    # and returned `0 if passed == total`, so a run where the cross-fleet gates
+    # never fired still printed a confident "GATES: 6/6 passed" and exited 0.
+    # A skipped check reported as a pass is exactly the rot INC-9/INC-11/INC-12
+    # were raised about -- a gate that cannot fail -- reproduced a third time,
+    # inside the verifier that exists to police it.
+    #
+    # (PR #7 diagnosed this same name mismatch but was closed UNMERGED, superseded
+    # by #8/#12, so the repair was never actually landed on main. It is landed here.)
+    #
+    # Fix: search the REAL repo names first, keep the legacy names as fallbacks so
+    # other checkout layouts still work, and make a genuine skip VISIBLE in the
+    # summary instead of laundering it into the pass count.
+    TARGET_DIRS = ("fabric-ic-incident-target", "incident-target")
+    GATEWAY_DIRS = ("fabric-gateway-demo", "gateway")
+
     _fleet_roots = [CHECKOUT_API.parent, ROOT / "fleet", ROOT]
     target = next(
-        (p for p in (r / "incident-target" / "checkout.py" for r in _fleet_roots) if p.is_file()),
+        (
+            r / d / "checkout.py"
+            for r in _fleet_roots
+            for d in TARGET_DIRS
+            if (r / d / "checkout.py").is_file()
+        ),
         None,
     )
     gateway = next(
         (
-            p
-            for p in (
-                r / "gateway" / "service" / "usage_aggregator.py" for r in _fleet_roots
-            )
-            if p.is_file()
+            r / d / "service" / "usage_aggregator.py"
+            for r in _fleet_roots
+            for d in GATEWAY_DIRS
+            if (r / d / "service" / "usage_aggregator.py").is_file()
         ),
         None,
     )
 
     if target is None or gateway is None:
+        # A genuine skip (e.g. a bare clone of just this repo). Say so LOUDLY and
+        # report it as SKIPPED -- never fold it into "passed", or the next reader
+        # will trust three gates that never ran.
+        #
+        # STRICTNESS -- why a skip is not unconditionally fatal.
+        #
+        # checkout-api's own CI checks out ONLY checkout-api, so the sibling fleet
+        # repos are legitimately absent there. Making the skip always fatal would
+        # turn this verifier permanently red in the very CI job that runs it --
+        # which is precisely the expired-precondition bug INC-11 and INC-12 were
+        # raised to repair. Re-introducing it here would be a regression.
+        #
+        # But "visible" alone is too weak wherever the cross-fleet gates ARE
+        # expected to run (the commander workspace, which clones all three repos):
+        # there, a silent skip is the whole INC-13 defect. So the caller declares
+        # its expectation and a broken skip becomes FATAL:
+        #
+        #   FABRIC_REQUIRE_CROSS_FLEET=1  (env)  or  --require-cross-fleet  (flag)
+        #
+        # Default (bare checkout / repo CI): skip is reported, exit stays 0.
+        # Strict (commander workspace):      skip is a hard FAILURE, exit 1.
+        #
+        # The env value is case-folded: a human setting `FALSE`, `False` or `No`
+        # means "off", and must not accidentally turn strict mode ON.
+        _flag = os.environ.get("FABRIC_REQUIRE_CROSS_FLEET", "").strip().lower()
+        require_cross_fleet = (
+            _flag not in ("", "0", "false", "no", "off")
+            or "--require-cross-fleet" in sys.argv[1:]
+        )
+
+        missing = []
+        if target is None:
+            missing.append(f"checkout.py in any of {TARGET_DIRS}")
+        if gateway is None:
+            missing.append(f"service/usage_aggregator.py in any of {GATEWAY_DIRS}")
         print(
-            "\n[SKIP] G6 cross-fleet re-confirmation (INC-6/5/8): the other fleet\n"
-            "       repos are not present in this checkout. Run this verifier from\n"
-            "       the incident-commander workspace to execute those gates."
+            "\n[SKIP] G6a/G6b/G6c cross-fleet re-confirmation (INC-6/5/8) DID NOT RUN.\n"
+            f"       Not found: {'; '.join(missing)}\n"
+            f"       Searched: {[str(r) for r in _fleet_roots]}\n"
+            "       Clone the sibling fleet repos beside this one to execute them."
         )
         passed = sum(1 for _, ok, _ in RESULTS if ok)
         total = len(RESULTS)
-        print(f"\n{'=' * 74}\nGATES: {passed}/{total} passed\n{'=' * 74}")
+        print(f"\n{'=' * 74}")
+        print(f"GATES: {passed}/{total} passed, 3 SKIPPED (cross-fleet gates did not run)")
+        print(f"{'=' * 74}")
+        if require_cross_fleet:
+            print(
+                "FATAL: cross-fleet re-confirmation was REQUIRED\n"
+                "       (FABRIC_REQUIRE_CROSS_FLEET / --require-cross-fleet) but the\n"
+                "       sibling repos were not found, so G6a/G6b/G6c did not execute.\n"
+                "       Refusing to report a pass for gates that never ran."
+            )
+            return 1
+        print(
+            "NOTE: exit 0 is correct for a bare single-repo checkout (this repo's own\n"
+            "      CI clones only checkout-api). Run with --require-cross-fleet from\n"
+            "      the commander workspace to make a missing sibling FATAL."
+        )
         return 0 if passed == total else 1
 
     # Re-confirm the two policy-blocked defects are STILL live on current HEAD.

@@ -72,3 +72,33 @@ jobs:
 
       - name: Run the INC-12 divergence gate (proves the step above is not redundant)
         run: python3 artifacts/incident/verify_inc12_ci_runs_verifier.py
+
+      # INC-13 (Fabric autonomous incident commander).
+      #
+      # The INC-9 verifier above carried THREE cross-fleet gates (G6a/G6b/G6c)
+      # that re-confirm the owner-blocked billing defects are still live. Its
+      # sibling-repo discovery looked for directories named `incident-target` and
+      # `gateway`; the real repos are `fabric-ic-incident-target` and
+      # `fabric-gateway-demo`. The lookup NEVER matched, so those three gates were
+      # unreachable in every environment -- and the SKIP path folded them into the
+      # pass count, printing "GATES: 6/6 passed" and exiting 0 while a third of the
+      # verifier never ran.
+      #
+      # That is this fleet's signature failure -- a gate that cannot fail --
+      # occurring INSIDE the verifier whose job is to police it. This step guards
+      # the repair: G5 proves the old discovery is blind while the new one executes
+      # (divergence), and G6 proves a genuine absence still reports SKIPPED rather
+      # than laundering un-run gates into a pass.
+      #
+      # NOTE ON EXIT CODES: this CI job clones ONLY checkout-api, so the sibling
+      # fleet repos are legitimately absent here and the INC-9 verifier's
+      # cross-fleet gates correctly report SKIPPED (exit 0). Forcing them fatal
+      # here would make CI permanently red -- the very expired-precondition bug
+      # INC-11/INC-12 repaired. Pass --require-cross-fleet when running from the
+      # commander workspace (all three repos present) to make a silent skip FATAL.
+      #
+      # SAFETY: no production source is touched. The verifier hashes session.js,
+      # checkout.py and usage_aggregator.py BEFORE running any gate and asserts
+      # all three are byte-identical afterwards.
+      - name: Run the INC-13 gate (proves the INC-9 cross-fleet gates are not dead)
+        run: python3 artifacts/incident/verify_inc13_g6_was_dead.py
