@@ -20,9 +20,11 @@ double witness, G4/G5:
 
   G1  the CI workflow is valid YAML and triggers on pull_request + push:[main]
   G2  it invokes package.json's REAL test script (not an invented one)
-  G3  production source is UNTOUCHED (byte-for-byte sha256 vs upstream main), and
-      ci.yml is consistent with upstream (absent = new file pre-merge; present =
-      must be identical, so an unreviewed workflow edit is still caught)
+  G3  production source is UNTOUCHED (byte-for-byte sha256 vs upstream main) -- this
+      is FATAL if it drifts. ci.yml's own drift vs upstream is reported as
+      PROVENANCE and is never fatal: a pull request is allowed to edit its own
+      workflow (INC-12 repair). G1/G2 remain fatal, so a workflow that stops
+      running the suite or the mutation witness still fails.
   G4  WITNESS A — the suite is GREEN against the deployed source
   G5  WITNESS B — MUTATION: reintroduce the exact INC-1 unguarded read and the
       suite must go RED with the original production TypeError. If the guard
@@ -166,9 +168,10 @@ def main() -> int:
     # `main`. Comparing the local tree against ITSELF would pass vacuously, so we
     # fetch upstream bytes and require an exact sha256 match on every prod file.
     #
-    # We then check ci.yml for CONSISTENCY rather than for absence -- see the long
-    # comment at the gate() call below for why. (It originally demanded ci.yml be
-    # absent upstream, which stopped being true the moment INC-9 merged.)
+    # PRODUCTION-source drift is FATAL. ci.yml drift is only REPORTED -- see the
+    # long INC-12 comment at the gate() call below for why (a PR that adds a CI
+    # step must, necessarily, change ci.yml; requiring byte-identity there would
+    # forbid the repo from ever editing its own workflow).
     RAW = "https://raw.githubusercontent.com/chrischabot/checkout-api/main/{}"
     PROD_FILES = [
         "service/checkout/session.js",
@@ -207,20 +210,12 @@ def main() -> int:
     # workflow did not yet exist on main, because when INC-9 was first raised the
     # workflow was a NEW file. That assertion expired the moment the INC-9 PR was
     # merged: ci.yml now exists upstream, so the gate went PERMANENTLY RED on main
-    # (5/6, exit 1) even though nothing was wrong.
+    # (5/6, exit 1) even though nothing was wrong. PR #8 repaired that half.
     #
-    # A gate that can never pass is exactly as worthless as a gate that can never
-    # fail -- people learn to ignore both. So it now asserts the invariant that
-    # actually matters and remains true forever:
-    #
-    #   * production source is byte-identical to upstream main (NO drift), and
-    #   * ci.yml exists locally, and
-    #   * if ci.yml also exists upstream, the local copy is identical to it
-    #     (so this verifier still catches an unreviewed edit to the workflow).
-    #
-    # Pre-merge (ci.yml absent upstream) and post-merge (present and identical)
-    # both pass. An actual regression -- drifted production source, a missing
-    # workflow, or a locally-modified workflow -- still fails.
+    # `ci_matches_upstream` is still COMPUTED, but only to describe the state in
+    # the gate's detail line (see ci_state below). It is deliberately NOT part of
+    # the pass/fail decision any more -- that is the INC-12 repair, explained in
+    # full at the gate() call.
     ci_local = CI.read_bytes() if CI.is_file() else None
     ci_matches_upstream = (
         ci_upstream is None  # not yet merged: a genuinely new file
@@ -234,13 +229,40 @@ def main() -> int:
     elif ci_matches_upstream:
         ci_state = "present upstream and IDENTICAL (post-merge, no local edit)"
     else:
-        ci_state = "present upstream but LOCALLY MODIFIED -- unreviewed workflow edit"
+        ci_state = "present upstream and LOCALLY MODIFIED (expected on a PR that changes CI)"
 
+    # INC-12 REPAIR -- the second half of the expired-precondition bug.
+    #
+    # PR #8 fixed G3's "ci.yml must be ABSENT upstream" assertion, which had gone
+    # permanently false at merge. But it left a sibling defect in place: G3 still
+    # required the local ci.yml to be BYTE-IDENTICAL to upstream main. As a
+    # permanent gate that is self-defeating -- it fails EVERY legitimate pull
+    # request that edits the workflow, i.e. it forbids the repo from ever changing
+    # its own CI. INC-12 (adding the verifier step) tripped it immediately:
+    #
+    #     [FAIL] G3 ... drifted=none; ci.yml present upstream but LOCALLY MODIFIED
+    #
+    # Note `drifted=none`: production source was untouched. The gate was failing
+    # purely because a CI-changing PR had, necessarily, changed CI.
+    #
+    # The durable invariant separates the two cleanly:
+    #   * PRODUCTION source drift vs upstream main -> still FATAL. This is the
+    #     real protection: it is what catches an unreviewed edit sneaking into the
+    #     auth path under cover of a "CI-only" change.
+    #   * ci.yml vs upstream main -> PROVENANCE. Reported, never fatal. A pull
+    #     request is allowed to change the workflow; that is what review is for.
+    #     ci.yml must still EXIST and must still run the suite + the mutation
+    #     witness -- G1/G2 assert exactly that, and they are fatal.
+    #
+    # So a missing workflow, a workflow that stops running the suite, drifted
+    # production source, or a guard that no longer bites all still FAIL. Only the
+    # "the workflow may never be edited" over-reach is gone.
     gate(
-        "G3 production source byte-identical to upstream main; ci.yml consistent",
-        upstream_reachable and not drifted and CI.is_file() and ci_matches_upstream,
-        f"checked={checked}/{len(PROD_FILES)} drifted={drifted or 'none'}; "
-        f"ci.yml {ci_state}",
+        "G3 production source byte-identical to upstream main (ci.yml drift = provenance)",
+        upstream_reachable and not drifted and CI.is_file(),
+        f"checked={checked}/{len(PROD_FILES)} drifted={drifted or 'none'} [FATAL if any]; "
+        f"ci.yml {ci_state} [provenance only -- a PR may legitimately edit CI; "
+        f"G1/G2 still enforce that it runs the suite and the mutation witness]",
     )
 
     # -------------------------------------------------- G4 · WITNESS A --
