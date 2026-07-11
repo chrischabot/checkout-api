@@ -44,7 +44,12 @@ Gates:
       This is the precondition that makes the divergence meaningful.
   G5  DIVERGENCE (LOAD-BEARING): same gutted tree ->
         OLD CI (suite only)       exit 0  -- slips through
-        NEW CI (suite + verifier) exit 1  -- caught
+        NEW CI (suite + verifier) exit 1  -- caught, AND the failure is
+        ATTRIBUTED to the verifier's mutation witness (its G5/WITNESS B) rather
+        than to any other gate. A bare non-zero exit is not proof: the simulated
+        tree deliberately differs from upstream, so an unrelated provenance gate
+        could redden for a reason that has nothing to do with the guard. We parse
+        the per-gate output and require the witness itself to have bitten.
   G6  the real tree was mutated by NOTHING (sha256 of every file, before/after)
 
 Exit 0 = every gate passed.
@@ -250,17 +255,45 @@ def main() -> int:
             text=True,
             timeout=600,
         )
+        vblob = new_ci_verifier.stdout + new_ci_verifier.stderr
+
+        # ATTRIBUTION -- this is the correctness fix, and it matters.
+        #
+        # A bare non-zero exit from the nested verifier is NOT proof that the
+        # mutation witness caught anything. The verifier has several gates, and in
+        # this simulation the tree deliberately differs from upstream `main` (we
+        # gutted the suite and reintroduced the defect), so a provenance/drift
+        # gate could fail for a reason that has NOTHING to do with the guard.
+        # Accepting `returncode != 0` would let the divergence "pass" for the
+        # wrong reason -- a gate that is right by accident, which is exactly the
+        # sin this whole verifier exists to prevent.
+        #
+        # So require the failure to be ATTRIBUTABLE to the mutation witness:
+        # parse the per-gate output and demand that G5 (WITNESS B) is among the
+        # failures. If NEW CI reddens for any other reason, this gate reports it
+        # as NOT a valid divergence.
+        failed_gates = re.findall(r"^\[FAIL\]\s+(\S+)", vblob, re.M)
+        witness_b_failed = any(g.startswith("G5") for g in failed_gates)
+
         new_ci_exit = 0 if (old_ci.returncode == 0 and new_ci_verifier.returncode == 0) else 1
 
-        diverges = old_ci.returncode == 0 and new_ci_exit != 0
+        diverges = (
+            old_ci.returncode == 0  # OLD CI is blind: the regression slips through
+            and new_ci_verifier.returncode != 0  # NEW CI reddens
+            and witness_b_failed  # ...and it reddens BECAUSE the witness bit
+        )
         gate(
-            "G5 DIVERGENCE (LOAD-BEARING): OLD CI misses it, NEW CI catches it",
+            "G5 DIVERGENCE (LOAD-BEARING): OLD CI misses it, NEW CI catches it via WITNESS B",
             diverges,
             f"gutted guard + INC-1 defect reintroduced -> "
             f"OLD CI (suite only) exit={old_ci.returncode} pass={op} fail={of_} "
-            f"[{'SLIPS THROUGH' if old_ci.returncode == 0 else 'caught -- step would be redundant'}] "
+            f"[{'SLIPS THROUGH' if old_ci.returncode == 0 else 'caught -- the added step would be redundant'}] "
             f"| NEW CI (suite + verifier) exit={new_ci_exit} "
-            f"[{'CAUGHT by the verifier step' if new_ci_exit else 'MISSED'}]",
+            f"[{'CAUGHT' if new_ci_verifier.returncode else 'MISSED'}]; "
+            f"verifier failing gates={failed_gates or 'none'}; "
+            f"ATTRIBUTED to the mutation witness (G5/WITNESS B)={witness_b_failed} "
+            f"[required: a non-zero exit alone would not prove the witness bit -- "
+            f"it could be an unrelated gate reddening on the simulated tree]",
         )
 
     # ------------------------------------------------------------------ G6 --
