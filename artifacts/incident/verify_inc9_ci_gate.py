@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import shutil
@@ -74,6 +75,33 @@ GUARDED = "const refreshToken = session.auth && session.auth.refreshToken;"
 DEFECT = "const refreshToken = session.auth.refreshToken;"
 
 RESULTS: list[tuple[str, bool, str]] = []
+# INC-14: skips live in their OWN bucket. Previously the skip path computed
+# passed == total over only the gates that had run, so three unreachable gates
+# were reported as "6/6 passed". A skip must be structurally incapable of being
+# counted as a pass -- so it never enters RESULTS.
+SKIPPED: list[tuple[str, str]] = []
+
+
+def _summary() -> int:
+    """Report passes, failures and SKIPS separately, and never conflate them."""
+    passed = sum(1 for _, ok, _ in RESULTS if ok)
+    failed = [name for name, ok, _ in RESULTS if not ok]
+    total = len(RESULTS)
+
+    for name, detail in SKIPPED:
+        print(f"\n[SKIP] {name}\n       {detail}")
+
+    bar = "=" * 74
+    tally = f"GATES: {passed}/{total} passed"
+    if SKIPPED:
+        tally += f", {len(SKIPPED)} SKIPPED (not counted as passes)"
+    print(f"\n{bar}\n{tally}\n{bar}")
+
+    if failed:
+        for name in failed:
+            print(f"  FAILED: {name}")
+        return 1
+    return 0
 
 
 def gate(name: str, ok: bool, detail: str = "") -> None:
@@ -325,38 +353,88 @@ def main() -> int:
     # ---------------------------------------------------------------- G6 --
     # Cross-fleet re-confirmation (INC-6 / INC-5 / INC-8) needs the OTHER two
     # fleet repos. Depending on how this verifier is invoked, they may sit beside
-    # this repo (commander workspace: fleet/{checkout-api,incident-target,gateway})
-    # or not be present at all (a plain checkout of checkout-api). Search every
-    # plausible sibling location; if they genuinely are not here, SKIP explicitly
-    # rather than reporting a vacuous pass.
+    # this repo (commander workspace) or not be present at all (a plain checkout
+    # of checkout-api, e.g. this repo's own CI, which clones only itself).
+    #
+    # INC-14: this discovery was DEAD CODE. It searched only for siblings named
+    # "incident-target" and "gateway", but the fleet repos are actually named
+    # "fabric-ic-incident-target" and "fabric-gateway-demo". The lookup therefore
+    # never matched in ANY environment -- including the commander workspace it was
+    # written for -- so G6a/G6b/G6c never executed. Worse, the skip path below
+    # computed passed == total over only the gates that HAD run and printed a
+    # confident "6/6 passed", laundering three unreachable gates into a green
+    # pass count. A gate that cannot fail is decoration; a SKIP reported as a
+    # PASS is worse, because it actively asserts coverage it does not have.
+    #
+    # The fix ADDS the real names (keeping the legacy ones as fallbacks, so other
+    # checkout layouts keep working) and tracks skips in their own bucket so they
+    # are structurally incapable of being counted as passes.
     _fleet_roots = [CHECKOUT_API.parent, ROOT / "fleet", ROOT]
+    _target_names = ("fabric-ic-incident-target", "incident-target")
+    _gateway_names = ("fabric-gateway-demo", "gateway")
+
     target = next(
-        (p for p in (r / "incident-target" / "checkout.py" for r in _fleet_roots) if p.is_file()),
+        (
+            p
+            for p in (
+                r / name / "checkout.py"
+                for r in _fleet_roots
+                for name in _target_names
+            )
+            if p.is_file()
+        ),
         None,
     )
     gateway = next(
         (
             p
             for p in (
-                r / "gateway" / "service" / "usage_aggregator.py" for r in _fleet_roots
+                r / name / "service" / "usage_aggregator.py"
+                for r in _fleet_roots
+                for name in _gateway_names
             )
             if p.is_file()
         ),
         None,
     )
 
-    if target is None or gateway is None:
-        print(
-            "\n[SKIP] G6 cross-fleet re-confirmation (INC-6/5/8): the other fleet\n"
-            "       repos are not present in this checkout. Run this verifier from\n"
-            "       the incident-commander workspace to execute those gates."
-        )
-        passed = sum(1 for _, ok, _ in RESULTS if ok)
-        total = len(RESULTS)
-        print(f"\n{'=' * 74}\nGATES: {passed}/{total} passed\n{'=' * 74}")
-        return 0 if passed == total else 1
+    # Strict mode: where the siblings are EXPECTED (the commander workspace), a
+    # missing sibling must be fatal rather than silently skipped. It is not fatal
+    # by default, because checkout-api's own CI legitimately clones only this
+    # repo -- making the skip unconditionally fatal would leave the verifier
+    # permanently red in the very job that runs it, which is the INC-11 defect.
+    _strict = (
+        "--require-cross-fleet" in sys.argv
+        or os.environ.get("FABRIC_REQUIRE_CROSS_FLEET", "").strip().lower()
+        in ("1", "true", "yes")
+    )
 
-    # Re-confirm the two policy-blocked defects are STILL live on current HEAD.
+    if target is None or gateway is None:
+        missing = []
+        if target is None:
+            missing.append("/".join(_target_names) + "/checkout.py")
+        if gateway is None:
+            missing.append("/".join(_gateway_names) + "/service/usage_aggregator.py")
+        detail = "not found beside this repo: " + ", ".join(missing)
+
+        if _strict:
+            gate(
+                "G6 cross-fleet re-confirmation (INC-6/5/8) [strict mode]",
+                False,
+                detail + " -- refusing to pass un-run gates",
+            )
+        else:
+            SKIPPED.append(
+                (
+                    "G6 cross-fleet re-confirmation (INC-6/5/8)",
+                    detail
+                    + "; run from the incident-commander workspace (or pass"
+                    " --require-cross-fleet) to execute these gates",
+                )
+            )
+        return _summary()
+
+    # Re-confirm the policy-blocked defects are STILL live on current HEAD.
     checkout = load(target, "checkout_live")
     leak = checkout.apply_discount(30_000, [{"price_cents": 1_000}])
     price_blind = checkout.apply_discount(30_000, [{"price_cents": 1}]) == checkout.apply_discount(
@@ -376,8 +454,8 @@ def main() -> int:
     except KeyError:
         batch_died = True
 
-    # NEW this run: a null model does NOT raise — it silently aggregates billable
-    # tokens under a None key. A different, quieter failure than INC-3/INC-5.
+    # A null model does NOT raise -- it silently aggregates billable tokens under
+    # a None key. A different, quieter failure than INC-3/INC-5.
     null_model = agg.aggregate_usage([{"model": None, "tokens": 10}])
     silent_null = None in null_model["per_model"]
     gate(
@@ -386,24 +464,14 @@ def main() -> int:
         "one malformed record raises KeyError and destroys the whole batch",
     )
     gate(
-        "G6c INC-8 (NEW) null model silently mis-attributes billable tokens",
+        "G6c INC-8 null model silently mis-attributes billable tokens",
         silent_null,
         f"{{'model': None, 'tokens': 10}} -> {null_model} — no error raised; "
         "10 billable tokens booked against a None model key",
     )
 
     # ------------------------------------------------------------ summary --
-    passed = sum(1 for _, ok, _ in RESULTS if ok)
-    total = len(RESULTS)
-    print(f"\n{'=' * 74}\nGATES: {passed}/{total} passed\n{'=' * 74}")
-    if passed != total:
-        for name, ok, _ in RESULTS:
-            if not ok:
-                print(f"  FAILED: {name}")
-        return 1
-    print("All gates green. The CI patch is verified safe (production source")
-    print("untouched) and PROVEN to bite (mutation goes red).")
-    return 0
+    return _summary()
 
 
 if __name__ == "__main__":
