@@ -1,0 +1,10 @@
+{
+  "name": "checkout-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fabric incident-commander demonstrator target service (checkout-api)",
+  "main": "service/checkout/session.js",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
