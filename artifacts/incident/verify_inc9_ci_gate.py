@@ -20,13 +20,17 @@ double witness, G4/G5:
 
   G1  the CI workflow is valid YAML and triggers on pull_request + push:[main]
   G2  it invokes package.json's REAL test script (not an invented one)
-  G3  production source is UNTOUCHED (byte-for-byte sha256 vs upstream main), and
-      ci.yml is consistent with upstream (absent = new file pre-merge; present =
-      must be identical, so an unreviewed workflow edit is still caught)
-  G4  WITNESS A — the suite is GREEN against the deployed source
+  G3  PROVENANCE ONLY, never fatal: report whether the local tree differs from
+      upstream `main`. This gate must NOT fail on drift. It runs as a CI step on
+      every pull request, and a pull request's whole purpose is to change source.
+      Requiring byte-identity would forbid the repo from ever being edited.
+      What actually protects the auth path is G4/G5 (the guard is green on this
+      source, and it still goes RED on the INC-1 defect) plus code review.
+  G4  WITNESS A — the suite is GREEN against the source under test
   G5  WITNESS B — MUTATION: reintroduce the exact INC-1 unguarded read and the
       suite must go RED with the original production TypeError. If the guard
-      cannot fail, it is worthless.
+      cannot fail, it is worthless. THIS is the gate with teeth.
+  G3b the verifier itself mutated nothing (sha256 before == after)
   G6  the two live policy-blocked defects are STILL live on current HEAD
       (we re-confirm rather than trusting a previous run's word)
 
@@ -162,13 +166,13 @@ def main() -> int:
     )
 
     # ---------------------------------------------------------------- G3 --
-    # Provenance: the authoritative statement of "what is deployed" is upstream
-    # `main`. Comparing the local tree against ITSELF would pass vacuously, so we
-    # fetch upstream bytes and require an exact sha256 match on every prod file.
+    # PROVENANCE ONLY. This gate reports drift; it must never fail on it.
     #
-    # We then check ci.yml for CONSISTENCY rather than for absence -- see the long
-    # comment at the gate() call below for why. (It originally demanded ci.yml be
-    # absent upstream, which stopped being true the moment INC-9 merged.)
+    # See the long INC-12 comment at the gate() call below. In short: this
+    # verifier is now a CI step that runs on every pull request, and a pull
+    # request exists in order to change code. A gate demanding byte-identity with
+    # upstream `main` would fail every legitimate PR -- it would forbid the repo
+    # from ever being edited, which is not a safety property, it is a padlock.
     RAW = "https://raw.githubusercontent.com/chrischabot/checkout-api/main/{}"
     PROD_FILES = [
         "service/checkout/session.js",
@@ -207,20 +211,12 @@ def main() -> int:
     # workflow did not yet exist on main, because when INC-9 was first raised the
     # workflow was a NEW file. That assertion expired the moment the INC-9 PR was
     # merged: ci.yml now exists upstream, so the gate went PERMANENTLY RED on main
-    # (5/6, exit 1) even though nothing was wrong.
+    # (5/6, exit 1) even though nothing was wrong. PR #8 repaired that half.
     #
-    # A gate that can never pass is exactly as worthless as a gate that can never
-    # fail -- people learn to ignore both. So it now asserts the invariant that
-    # actually matters and remains true forever:
-    #
-    #   * production source is byte-identical to upstream main (NO drift), and
-    #   * ci.yml exists locally, and
-    #   * if ci.yml also exists upstream, the local copy is identical to it
-    #     (so this verifier still catches an unreviewed edit to the workflow).
-    #
-    # Pre-merge (ci.yml absent upstream) and post-merge (present and identical)
-    # both pass. An actual regression -- drifted production source, a missing
-    # workflow, or a locally-modified workflow -- still fails.
+    # `ci_matches_upstream` is still COMPUTED, but only to describe the state in
+    # the gate's detail line (see ci_state below). It is deliberately NOT part of
+    # the pass/fail decision any more -- that is the INC-12 repair, explained in
+    # full at the gate() call.
     ci_local = CI.read_bytes() if CI.is_file() else None
     ci_matches_upstream = (
         ci_upstream is None  # not yet merged: a genuinely new file
@@ -234,16 +230,59 @@ def main() -> int:
     elif ci_matches_upstream:
         ci_state = "present upstream and IDENTICAL (post-merge, no local edit)"
     else:
-        ci_state = "present upstream but LOCALLY MODIFIED -- unreviewed workflow edit"
+        ci_state = "present upstream and LOCALLY MODIFIED (expected on a PR that changes CI)"
 
+    # INC-12 REPAIR -- the expired-precondition bug, fixed at the root.
+    #
+    # History: G3 originally asserted "ci.yml is ABSENT upstream (a new file)".
+    # True exactly once -- in the PR that introduced ci.yml -- and permanently
+    # false the instant it merged, so the verifier went permanently RED on a
+    # healthy `main`. PR #8 fixed that clause. But two sibling over-reaches
+    # survived, and BOTH are fatal once this verifier becomes a CI step:
+    #
+    #   1. ci.yml had to be byte-identical to upstream  -> fails every PR that
+    #      edits the workflow (including the one adding this very step).
+    #   2. session.js / package.json / session.test.js had to be byte-identical
+    #      to upstream -> fails EVERY PR that touches source, tests, or package
+    #      metadata. That is every normal pull request this repo will ever see.
+    #
+    # A gate that no legitimate change can pass is not a safety property. It is a
+    # padlock on the repo, and its only real effect is to teach the team that red
+    # CI means nothing -- which is precisely the disease this fleet is trying to
+    # cure. It is exactly as worthless as a gate that can never fail.
+    #
+    # So G3 is now PROVENANCE: it fetches upstream bytes, reports whether the
+    # tree differs, and NEVER fails on the difference. "Is this source the
+    # deployed source?" is a useful thing to print in a CI log; it is not a thing
+    # a pull request can be required to answer "yes" to.
+    #
+    # WHAT STILL PROTECTS THE AUTH PATH -- and these remain fatal:
+    #   * G1/G2  the workflow exists, fires on PRs, and actually runs the suite.
+    #   * G4     WITNESS A: the suite is GREEN on the source under test.
+    #   * G5     WITNESS B: the suite still goes RED on the INC-1 defect. This is
+    #            the gate with teeth -- it is what catches the guard being gutted
+    #            or the defect being reintroduced, on WHATEVER source is present.
+    #   * G3b    this verifier mutates nothing.
+    #
+    # Note that G5 is strictly stronger protection than a hash check ever was: a
+    # hash gate only says "these bytes are not the deployed bytes", while G5 says
+    # "whatever these bytes are, the auth guard still works and the suite still
+    # catches it breaking". That is the property we actually want on a PR.
     gate(
-        "G3 production source byte-identical to upstream main; ci.yml consistent",
-        upstream_reachable and not drifted and CI.is_file() and ci_matches_upstream,
-        f"checked={checked}/{len(PROD_FILES)} drifted={drifted or 'none'}; "
-        f"ci.yml {ci_state}",
+        "G3 PROVENANCE (never fatal): tree vs upstream main, reported not enforced",
+        CI.is_file() and bool(ci_text.strip()),
+        f"checked={checked}/{len(PROD_FILES)} vs upstream main: "
+        f"{'identical (this IS the deployed source)' if upstream_reachable and not drifted else ('differs in ' + ', '.join(drifted)) if upstream_reachable else 'upstream unreachable'}"
+        f"; ci.yml {ci_state}. "
+        f"NOT FATAL -- a pull request may legitimately change source, tests or CI. "
+        f"Enforcement lives in G1/G2 (the guard is wired) and G4/G5 (the guard "
+        f"still bites on whatever source is present).",
     )
 
     # -------------------------------------------------- G4 · WITNESS A --
+    # The suite must be green on whatever source is present. On `main` that is
+    # the deployed source; on a PR branch it is the proposed source. Either way,
+    # a red suite is a hard fail.
     green = npm_test(CHECKOUT_API)
     p, f = tallies(green)
     gate(

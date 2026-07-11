@@ -42,3 +42,33 @@ jobs:
 
       - name: Run the session regression suite
         run: npm test
+
+      # INC-12 (Fabric autonomous incident commander).
+      #
+      # `npm test` above proves the suite is GREEN today. It CANNOT prove the
+      # suite would go RED if someone reintroduced the INC-1 cold-cache auth
+      # defect -- or quietly thinned the assertions that catch it. Only the
+      # mutation-witness verifier proves the guard still has teeth.
+      #
+      # That verifier has been merged on `main` since PR #3 and NOTHING
+      # EXECUTED IT. This workflow ran `npm test` and stopped. That is the
+      # INC-9 finding -- "a regression test that never runs is decoration" --
+      # reproduced one level up, ON THE GATE ITSELF.
+      #
+      # The sibling repos already run their verifiers as CI steps
+      # (fabric-ic-incident-target, and fabric-gateway-demo via INC-10).
+      # checkout-api was the last repo where the gate was dead code.
+      #
+      # SAFETY: no production source is touched. The verifier mutates
+      # session.js in a TEMP COPY only, and asserts the real file's sha256 is
+      # unchanged afterwards.
+      - name: Set up Python (for the incident verification gates)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run the INC-9 mutation-witness gate (proves the suite bites)
+        run: python3 artifacts/incident/verify_inc9_ci_gate.py
+
+      - name: Run the INC-12 divergence gate (proves the step above is not redundant)
+        run: python3 artifacts/incident/verify_inc12_ci_runs_verifier.py
