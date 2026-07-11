@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import shutil
@@ -49,6 +50,60 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+
+# Gates that were REQUESTED but could not execute. Tracked separately from
+# RESULTS so that a skipped gate can never be folded into the pass tally.
+# INC-15: the previous skip path computed `passed == total` over only the gates
+# that had RUN, printing a confident "6/6 passed" while G6a/G6b/G6c were
+# unreachable dead code. A skip laundered into a pass count is worse than a
+# missing check: it actively asserts coverage it does not have.
+SKIPPED: list[tuple[str, str]] = []
+
+
+def skip(name: str, detail: str) -> None:
+    SKIPPED.append((name, detail))
+    print(f"[SKIP] {name}\n         {detail}")
+
+
+def _strict_cross_fleet() -> bool:
+    """Promote a missing sibling from SKIP to FATAL.
+
+    Off by default and deliberately so: `checkout-api` CI clones only this repo,
+    so the siblings are legitimately absent there. Making the skip
+    unconditionally fatal would leave the verifier permanently red in the very
+    CI job that runs it -- which is exactly the expired-precondition bug that
+    INC-11/INC-12 were raised to repair. Re-committing it here would be a
+    regression. So the honest answer is a third state: SKIP -- reported, never
+    passed, and promotable to fatal by a caller that KNOWS the siblings ought to
+    be there (the commander workspace).
+    """
+    if "--require-cross-fleet" in sys.argv:
+        return True
+    return os.environ.get("FABRIC_REQUIRE_CROSS_FLEET", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+# INC-15: the real fleet repo directory names. The previous discovery searched
+# ONLY for "incident-target" and "gateway" -- names this fleet has never used --
+# so the lookup never matched in ANY environment, including the commander
+# workspace it was written for. The legacy names are KEPT as fallbacks: this fix
+# ADDS names, it never replaces them, so other checkout layouts keep working.
+_TARGET_DIRS = ("fabric-ic-incident-target", "incident-target")
+_GATEWAY_DIRS = ("fabric-gateway-demo", "gateway")
+
+
+def _find(roots: list[pathlib.Path], dirnames: tuple[str, ...], *relparts: str):
+    """First existing <root>/<dirname>/<relparts...> across all roots x names."""
+    for root in roots:
+        for dirname in dirnames:
+            candidate = root.joinpath(dirname, *relparts)
+            if candidate.is_file():
+                return candidate
+    return None
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -329,32 +384,36 @@ def main() -> int:
     # or not be present at all (a plain checkout of checkout-api). Search every
     # plausible sibling location; if they genuinely are not here, SKIP explicitly
     # rather than reporting a vacuous pass.
-    _fleet_roots = [CHECKOUT_API.parent, ROOT / "fleet", ROOT]
-    target = next(
-        (p for p in (r / "incident-target" / "checkout.py" for r in _fleet_roots) if p.is_file()),
-        None,
-    )
-    gateway = next(
-        (
-            p
-            for p in (
-                r / "gateway" / "service" / "usage_aggregator.py" for r in _fleet_roots
-            )
-            if p.is_file()
-        ),
-        None,
-    )
+    _fleet_roots = [CHECKOUT_API.parent, ROOT / "fleet", ROOT, ROOT.parent]
+    target = _find(_fleet_roots, _TARGET_DIRS, "checkout.py")
+    gateway = _find(_fleet_roots, _GATEWAY_DIRS, "service", "usage_aggregator.py")
 
     if target is None or gateway is None:
-        print(
-            "\n[SKIP] G6 cross-fleet re-confirmation (INC-6/5/8): the other fleet\n"
-            "       repos are not present in this checkout. Run this verifier from\n"
-            "       the incident-commander workspace to execute those gates."
+        missing = ", ".join(
+            n for n, p in (("incident-target", target), ("gateway", gateway)) if p is None
         )
-        passed = sum(1 for _, ok, _ in RESULTS if ok)
-        total = len(RESULTS)
-        print(f"\n{'=' * 74}\nGATES: {passed}/{total} passed\n{'=' * 74}")
-        return 0 if passed == total else 1
+        detail = (
+            f"sibling fleet repos not present in this checkout (missing: {missing}); "
+            f"searched {[d for d in _TARGET_DIRS]} / {[d for d in _GATEWAY_DIRS]} "
+            f"under {[str(r) for r in _fleet_roots]}"
+        )
+        print()
+        if _strict_cross_fleet():
+            gate(
+                "G6 cross-fleet re-confirmation (INC-6/5/8) — STRICT MODE",
+                False,
+                f"FATAL: --require-cross-fleet was requested but {detail}. "
+                "Refusing to pass gates that never executed.",
+            )
+        else:
+            skip(
+                "G6 cross-fleet re-confirmation (INC-6/5/8): NOT EXECUTED",
+                detail
+                + ". Reported as SKIPPED, never counted as a pass. Run from the "
+                "incident-commander workspace (or pass --require-cross-fleet) to "
+                "execute these gates.",
+            )
+        return _summary()
 
     # Re-confirm the two policy-blocked defects are STILL live on current HEAD.
     checkout = load(target, "checkout_live")
@@ -393,9 +452,24 @@ def main() -> int:
     )
 
     # ------------------------------------------------------------ summary --
+    return _summary()
+
+
+def _summary() -> int:
+    """Report executed gates and skipped gates SEPARATELY.
+
+    A skipped gate is never added to `passed` and never to `total`; it is listed
+    on its own line. This is the structural half of the INC-15 repair -- it is
+    now impossible for an un-run gate to be laundered into the pass tally.
+    """
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)
-    print(f"\n{'=' * 74}\nGATES: {passed}/{total} passed\n{'=' * 74}")
+    print(f"\n{'=' * 74}\nGATES: {passed}/{total} passed", end="")
+    if SKIPPED:
+        print(f"  ({len(SKIPPED)} SKIPPED — NOT counted as passes)", end="")
+    print(f"\n{'=' * 74}")
+    for name, _ in SKIPPED:
+        print(f"  SKIPPED: {name}")
     if passed != total:
         for name, ok, _ in RESULTS:
             if not ok:
