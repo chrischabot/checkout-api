@@ -160,10 +160,29 @@ def main() -> int:
     )
 
     # ---------------------------------------------------------------- G3 --
-    # Provenance: the authoritative statement of "what is deployed" is upstream
-    # `main`. Comparing the local tree against ITSELF would pass vacuously, so we
-    # fetch upstream bytes and require an exact sha256 match on every prod file,
-    # and require that ci.yml is genuinely absent upstream (i.e. it is new).
+    # INC-11 REPAIR.
+    #
+    # This gate originally asserted "ci.yml is ABSENT upstream (i.e. it is a new
+    # file)". That was a MERGE-TIME assertion: it was true exactly once, in the
+    # PR that introduced ci.yml, and it became permanently FALSE the instant that
+    # PR merged. Consequence: this verifier exited 1 on `main` — it could never
+    # pass again. A gate that cannot pass cannot be wired into CI, which is a
+    # large part of why nothing ever executed it.
+    #
+    # It also demanded that production source be byte-identical to upstream main.
+    # As a permanent CI gate that is actively wrong: it would fail EVERY
+    # legitimate pull request that changes session.js — the gate would forbid the
+    # repo from ever being edited.
+    #
+    # The durable invariant is not "nothing changed", it is "the guard is wired
+    # and the guard still bites":
+    #   * ci.yml EXISTS and runs the suite (G1/G2), and
+    #   * the suite is green on whatever source is present (G4), and
+    #   * the suite still goes RED on the INC-1 defect (G5 — the teeth), and
+    #   * this verifier itself mutates nothing (G3b).
+    #
+    # Upstream bytes are still fetched, but only as PROVENANCE, reported and
+    # never fatal: on a PR branch, drift from main is expected and legitimate.
     RAW = "https://raw.githubusercontent.com/chrischabot/checkout-api/main/{}"
     PROD_FILES = [
         "service/checkout/session.js",
@@ -181,7 +200,6 @@ def main() -> int:
             raise
 
     drifted: list[str] = []
-    checked = 0
     upstream_reachable = True
     try:
         for rel in PROD_FILES:
@@ -189,18 +207,21 @@ def main() -> int:
             local = (CHECKOUT_API / rel).read_bytes()
             if upstream is None or hashlib.sha256(upstream).digest() != hashlib.sha256(local).digest():
                 drifted.append(rel)
-            checked += 1
-        ci_upstream = fetch(".github/workflows/ci.yml")
     except urllib.error.URLError as exc:
         upstream_reachable = False
-        ci_upstream = None
-        print(f"         (upstream unreachable: {exc})")
+        print(f"         (upstream unreachable — provenance not recorded: {exc})")
+
+    provenance = (
+        f"vs upstream main: {'identical' if not drifted else 'differs in ' + ', '.join(drifted)}"
+        if upstream_reachable
+        else "upstream unreachable (informational only)"
+    )
 
     gate(
-        "G3 production source byte-identical to upstream main; ci.yml is NEW",
-        upstream_reachable and not drifted and ci_upstream is None and CI.is_file(),
-        f"checked={checked}/{len(PROD_FILES)} drifted={drifted or 'none'}; "
-        f"ci.yml upstream={'absent (new file)' if ci_upstream is None else 'ALREADY EXISTS'}",
+        "G3 the guard is WIRED: ci.yml present and invoking the real suite",
+        CI.is_file() and bool(ci_text.strip()),
+        f"ci.yml present={CI.is_file()}; {provenance} [drift is NOT a failure: a "
+        "pull request is allowed to change production source]",
     )
 
     # -------------------------------------------------- G4 · WITNESS A --
@@ -227,10 +248,25 @@ def main() -> int:
         mp, mf = tallies(red)
         blob = red.stdout + red.stderr
         reproduced = "Cannot read properties of null" in blob and "refreshToken" in blob
+
+        # INC-11 STRENGTHENING (the INC-10 lesson, applied here).
+        #
+        # `mf > 0` is a BOOLEAN question: "did anything go red?" A single
+        # surviving assertion anywhere in the file answers yes — so a suite that
+        # has been gutted down to one incidental check still passes a boolean
+        # gate. A boolean cannot distinguish a live guard from a gutted one.
+        #
+        # The intact suite exercises 5 cold-cache shapes; the INC-1 defect throws
+        # on every one of them, so an intact guard reddens 6 tests (5 subtests +
+        # their parent). Require a MAJORITY of that signal — at least 3 — so that
+        # thinning the cold-cache coverage fails the gate instead of squeaking by.
+        MIN_RED = 3
+        strong_enough = mf >= MIN_RED
         gate(
             "G5 WITNESS B — MUTATION: the INC-1 defect makes the suite go RED",
-            red.returncode != 0 and mf > 0 and reproduced,
-            f"exit={red.returncode} pass={mp} fail={mf}; "
+            red.returncode != 0 and strong_enough and reproduced,
+            f"exit={red.returncode} pass={mp} fail={mf} (need >={MIN_RED} reddening, "
+            f"not merely >0 — a boolean cannot tell a live gate from a gutted one); "
             f"original production TypeError reproduced={reproduced}",
         )
 
@@ -249,16 +285,32 @@ def main() -> int:
     # or not be present at all (a plain checkout of checkout-api). Search every
     # plausible sibling location; if they genuinely are not here, SKIP explicitly
     # rather than reporting a vacuous pass.
+    #
+    # INC-11 REPAIR: this search only ever looked for sibling directories literally
+    # named "incident-target" and "gateway". The repos are actually checked out as
+    # `fabric-ic-incident-target` and `fabric-gateway-demo`, so the lookup never
+    # matched and G6 ALWAYS took the SKIP path — reporting a clean 5/5 while three
+    # cross-fleet gates silently never ran. Search the real directory names too.
     _fleet_roots = [CHECKOUT_API.parent, ROOT / "fleet", ROOT]
+    _TARGET_DIRS = ("fabric-ic-incident-target", "incident-target")
+    _GATEWAY_DIRS = ("fabric-gateway-demo", "gateway")
     target = next(
-        (p for p in (r / "incident-target" / "checkout.py" for r in _fleet_roots) if p.is_file()),
+        (
+            p
+            for p in (
+                r / d / "checkout.py" for r in _fleet_roots for d in _TARGET_DIRS
+            )
+            if p.is_file()
+        ),
         None,
     )
     gateway = next(
         (
             p
             for p in (
-                r / "gateway" / "service" / "usage_aggregator.py" for r in _fleet_roots
+                r / d / "service" / "usage_aggregator.py"
+                for r in _fleet_roots
+                for d in _GATEWAY_DIRS
             )
             if p.is_file()
         ),
