@@ -1,0 +1,35 @@
+# INC-4 fix: execute the regression suite that guards INC-1.
+#
+# This repo already had a real test suite (`npm test`, 10/10) whose mutation
+# check provably fails on the INC-1 cold-cache auth defect -- but NOTHING ran
+# it. No workflow existed in this repo, so the guard was dead code: PR #1
+# ("perf: cache session lookups") could merge, and did merge, with no test
+# executing on the path it changed. That is how INC-1 reached production.
+#
+# Raised by Fabric's autonomous incident commander (INC-4).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # The suite is zero-dependency (node:test), so there is nothing to install.
+      - name: Run regression suite
+        run: npm test
