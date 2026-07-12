@@ -47,6 +47,7 @@ Exit: 0 = every gate passed.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.util
 import os
@@ -287,43 +288,93 @@ def main() -> int:
         )
 
     # ------------------------------------------- G4 · WITNESS A (blindness) --
+    # INC-19 REPAIR (layout independence).
+    #
+    # G4/G5 used to witness the OLD-vs-NEW divergence against the AMBIENT fleet
+    # roots. But the OLD lookup searches for directories literally named
+    # `incident-target/` and `gateway/`. So when the siblings happen to be cloned
+    # under exactly those LEGACY names, the OLD lookup RESOLVES them, "the old
+    # discovery is blind" is genuinely false, and G4/G5 both go RED -- on a tree
+    # where nothing is wrong. Measured: legacy layout -> 7/9, exit 1.
+    #
+    # Worse, it was self-contradictory: G3 above certifies the legacy layout as
+    # SUPPORTED ("the fix adds, never replaces"), and then G4/G5 hard-failed on it.
+    # The verifier's exit code became a function of how somebody named their clone
+    # directories, not of the property under test.
+    #
+    # A tree the OLD lookup can SEE cannot host a blindness witness. So witness on
+    # a tree that CAN host it: if the ambient layout uses the real repo names, use
+    # the ambient roots (today's passing path, preserved bit-for-bit). If the
+    # ambient layout is legacy, build a synthetic canonical real-name fleet and
+    # witness there. If there is no fleet at all, SKIP exactly as before.
     o_target, o_gateway = old_discovery(roots)
-    if siblings_present:
-        gate(
-            "G4 WITNESS A — the PRE-REPAIR discovery is BLIND on this very filesystem",
-            o_target is None and o_gateway is None,
-            f"old logic finds NEITHER sibling despite both being present: "
-            f"incident-target={o_target} gateway={o_gateway}. "
-            f"This is why G6a/G6b/G6c never executed, in ANY environment.",
-        )
-    else:
-        skip(
-            "G4 WITNESS A — the PRE-REPAIR discovery is BLIND on this very filesystem",
-            "needs the siblings present to demonstrate blindness IN SPITE of their "
-            "presence; on a bare checkout finding nothing is the correct answer.",
-        )
+    _witness_stack = contextlib.ExitStack()
+    with _witness_stack:
+        witness_roots = roots
+        witness_note = "ambient fleet roots (real repo names)"
+        # "Can the OLD lookup see this tree?" If yes, it cannot demonstrate
+        # blindness here, so relocate the witness onto a canonical real-name fleet.
+        if siblings_present and not (o_target is None and o_gateway is None):
+            synth = pathlib.Path(_witness_stack.enter_context(tempfile.TemporaryDirectory()))
+            (synth / "fabric-ic-incident-target").mkdir(parents=True)
+            (synth / "fabric-ic-incident-target" / "checkout.py").write_text("# synthetic\n")
+            (synth / "fabric-gateway-demo" / "service").mkdir(parents=True)
+            (synth / "fabric-gateway-demo" / "service" / "usage_aggregator.py").write_text(
+                "# synthetic\n"
+            )
+            witness_roots = [synth]
+            witness_note = (
+                "synthetic canonical real-name fleet — the AMBIENT layout uses the "
+                "LEGACY directory names, which the OLD lookup can SEE, so the ambient "
+                "tree cannot host a blindness witness (that is the INC-19 defect)"
+            )
 
-    # ---------------------------------------- G5 · WITNESS B (DIVERGENCE) --
-    # The load-bearing gate. OLD skips all three; NEW executes all three, on the
-    # same filesystem. If both behaved alike the repair would be a no-op.
-    # Requires the siblings to be present -- there is no divergence to observe on
-    # a filesystem where NEITHER implementation could find anything.
-    if siblings_present:
-        old_would_skip = o_target is None or o_gateway is None
-        new_would_run = n_target is not None and n_gateway is not None
-        gate(
-            "G5 WITNESS B — DIVERGENCE: OLD skips all 3 gates · NEW executes all 3",
-            old_would_skip and new_would_run and ran == {"G6a", "G6b", "G6c"},
-            f"OLD -> skips G6a/G6b/G6c (and printed a confident '6/6 passed') · "
-            f"NEW -> executes {sorted(ran)}. Same filesystem, opposite outcomes: "
-            f"the repair is NOT a no-op.",
-        )
-    else:
-        skip(
-            "G5 WITNESS B — DIVERGENCE: OLD skips all 3 gates · NEW executes all 3",
-            "needs the siblings present: with none on the filesystem, OLD and NEW "
-            "both legitimately find nothing and there is no divergence to witness.",
-        )
+        w_o_target, w_o_gateway = old_discovery(witness_roots)
+        w_n_target, w_n_gateway = new_discovery(witness_roots)
+
+        if siblings_present:
+            gate(
+                "G4 WITNESS A — the PRE-REPAIR discovery is BLIND on this very filesystem",
+                w_o_target is None and w_o_gateway is None,
+                f"old logic finds NEITHER sibling despite both being present: "
+                f"incident-target={w_o_target} gateway={w_o_gateway}. "
+                f"Witnessed against {witness_note}. "
+                f"This is why G6a/G6b/G6c never executed, in ANY environment.",
+            )
+        else:
+            skip(
+                "G4 WITNESS A — the PRE-REPAIR discovery is BLIND on this very filesystem",
+                "needs the siblings present to demonstrate blindness IN SPITE of their "
+                "presence; on a bare checkout finding nothing is the correct answer.",
+            )
+
+        # ---------------------------------------- G5 · WITNESS B (DIVERGENCE) --
+        # The load-bearing gate. OLD skips all three; NEW executes all three, on the
+        # same filesystem. If both behaved alike the repair would be a no-op.
+        # Requires the siblings to be present -- there is no divergence to observe on
+        # a filesystem where NEITHER implementation could find anything.
+        #
+        # `ran` is deliberately NOT recomputed here: it still comes from invoking the
+        # repaired verifier against the AMBIENT roots, which is the only thing that
+        # proves the actually-deployed discovery works on this real filesystem.
+        # Moving it onto the synthetic fleet would make G5 a tautology about a temp dir.
+        if siblings_present:
+            old_would_skip = w_o_target is None or w_o_gateway is None
+            new_would_run = w_n_target is not None and w_n_gateway is not None
+            gate(
+                "G5 WITNESS B — DIVERGENCE: OLD skips all 3 gates · NEW executes all 3",
+                old_would_skip and new_would_run and ran == {"G6a", "G6b", "G6c"},
+                f"OLD -> skips G6a/G6b/G6c (and printed a confident '6/6 passed') · "
+                f"NEW -> executes {sorted(ran)}. Witnessed against {witness_note}; "
+                f"`ran` measured against the AMBIENT fleet. Same filesystem, opposite "
+                f"outcomes: the repair is NOT a no-op.",
+            )
+        else:
+            skip(
+                "G5 WITNESS B — DIVERGENCE: OLD skips all 3 gates · NEW executes all 3",
+                "needs the siblings present: with none on the filesystem, OLD and NEW "
+                "both legitimately find nothing and there is no divergence to witness.",
+            )
 
     # -------------------------------------------- G6 · NEGATIVE CONTROL --
     # A bare checkout (exactly what `checkout-api` CI clones) has no siblings.
@@ -338,9 +389,36 @@ def main() -> int:
         lblob = lone.stdout + lone.stderr
         lran = gates_that_ran(lblob)
         skipped_reported = "SKIPPED" in lblob
-        # The old bug: a skip folded into the pass tally.
         lm = re.search(r"^GATES: (\d+)/(\d+) passed", lblob, re.M)
-        no_phantom_passes = bool(lm) and int(lm.group(2)) == 6  # only the 6 real gates counted
+        # INC-19 REPAIR (count independence).
+        #
+        # This predicate used to read:
+        #
+        #     no_phantom_passes = bool(lm) and int(lm.group(2)) == 6
+        #
+        # That is a MERGE-TIME FACT FROZEN INTO A PERMANENT GATE: it encodes "the
+        # INC-9 verifier has exactly six gates", true only on the day it was
+        # written. Add one perfectly ordinary new gate to that verifier -- exactly
+        # the behaviour this fleet wants to ENCOURAGE -- and this gate hard-reddens
+        # CI on a repo where nothing is wrong.
+        #
+        # Assert the INVARIANT, not the CONSTANT. What INC-15 actually exists to
+        # enforce is: the denominator counts exactly the gates that EXECUTED, and a
+        # SKIPPED gate is in neither the numerator nor the denominator. That holds
+        # whether the verifier has 6 gates or 40 -- while a skip laundered back into
+        # the tally is still caught.
+        n_executed = len(re.findall(r"^\[(?:PASS|FAIL)\]", lblob, re.M))
+        n_skipped = len(re.findall(r"^\[SKIP\]", lblob, re.M))
+        if lm:
+            numerator, denominator = int(lm.group(1)), int(lm.group(2))
+            no_phantom_passes = (
+                denominator == n_executed  # skips are NOT in the denominator
+                and numerator <= n_executed  # and cannot inflate the numerator
+                and denominator < n_executed + n_skipped  # a laundered skip pushes it higher
+            )
+        else:
+            numerator = denominator = -1
+            no_phantom_passes = False
         gate(
             "G6 NEGATIVE CONTROL — absent siblings SKIP (exit 0), never a silent pass",
             lone.returncode == 0
@@ -349,7 +427,9 @@ def main() -> int:
             and no_phantom_passes,
             f"bare checkout: exit={lone.returncode} cross-fleet executed={sorted(lran) or 'none'} "
             f"SKIPPED reported={skipped_reported} tally={lm.group(0) if lm else 'none'} "
-            f"(un-run gates are NOT in the denominator, and CI is not permanently red)",
+            f"executed={n_executed} skipped={n_skipped} "
+            f"(denominator counts exactly the gates that RAN — count-independent, so "
+            f"adding a gate cannot redden this; a laundered skip still would)",
         )
 
         # -------------------------------------------------------------- G7 --

@@ -131,3 +131,36 @@ jobs:
       # and a normal PR editing session.js.
       - name: Run the INC-18 gate (a gate must never punish the fix it asks for)
         run: python3 artifacts/incident/verify_inc18_gate_punishes_remediation.py
+
+      # INC-19 (Fabric autonomous incident commander).
+      #
+      # verify_inc15_cross_fleet_discovery.py carried TWO expired preconditions:
+      #
+      #   1. LAYOUT DEPENDENCE (G4/G5). Both witnessed the OLD-vs-NEW discovery
+      #      divergence against the AMBIENT fleet roots. But the OLD lookup searches
+      #      for dirs named `incident-target/` and `gateway/` -- so with the siblings
+      #      cloned under exactly those LEGACY names the OLD lookup RESOLVES them,
+      #      "the old discovery is blind" is FALSE, and both gates go RED. Measured:
+      #      real names -> 9/9 exit 0; legacy names -> 7/9 exit 1, on the SAME tree.
+      #      The exit code depended on how somebody named their clone directories.
+      #      And it was self-contradictory: G3 of that file certifies the legacy
+      #      layout as SUPPORTED, then G4/G5 hard-failed on it.
+      #
+      #   2. COUNT DEPENDENCE (G6). The negative control asserted the nested INC-9
+      #      verifier's tally had a denominator of literally six. Add one ordinary
+      #      new gate -- the behaviour this fleet wants to ENCOURAGE -- and the
+      #      healthy verifier reports 7/7 while that predicate rejects it.
+      #
+      # Both are this fleet's signature failure: a gate that cannot PASS is exactly
+      # as worthless as one that cannot FAIL -- both teach the team to ignore red CI.
+      #
+      # The repair witnesses blindness on a tree that CAN HOST the witness, and
+      # asserts the skip/denominator INVARIANT rather than a constant. Anti-weakening
+      # is gated: a laundered skip is STILL caught (a correction, not a relaxation).
+      #
+      # SAFETY: no production source is touched. On this bare CI checkout the layout
+      # witnesses need the sibling SOURCES, so they report SKIPPED (never a pass,
+      # never a hard failure) while the static gate still asserts BOTH repairs are
+      # present -- so this step cannot become the permanently-red INC-11 bug.
+      - name: Run the INC-19 gate (witnesses must not depend on ambient layout or gate counts)
+        run: python3 artifacts/incident/verify_inc19_layout_and_count_invariance.py
