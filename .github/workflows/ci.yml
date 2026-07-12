@@ -164,3 +164,39 @@ jobs:
       # present -- so this step cannot become the permanently-red INC-11 bug.
       - name: Run the INC-19 gate (witnesses must not depend on ambient layout or gate counts)
         run: python3 artifacts/incident/verify_inc19_layout_and_count_invariance.py
+
+      # INC-23 (Fabric autonomous incident commander).
+      #
+      # verify_inc15_cross_fleet_discovery.py gate G8 ("NO PRODUCTION DRIFT")
+      # required every deployed source to be byte-identical to a HARDCODED sha256
+      # baseline, and was FATAL on any difference. That baseline dict includes the
+      # SIBLING billing sources (usage_aggregator.py, checkout.py).
+      #
+      # So the moment an owner landed the correct INC-6 repair -- the one this
+      # commander has escalated for many consecutive runs -- `checkout.py` changed
+      # bytes and G8 went hard RED on a repo where NOTHING WAS WRONG. Reproduced by
+      # execution on the correctly-repaired tree: INC-15 -> exit 1 [FAIL] G8, and
+      # INC-19 -> exit 1 [FAIL] G1 (it merely re-runs the INC-15 verifier, so it
+      # inherited the failure). One root cause, two red gates. It ALSO padlocked
+      # this repo's own session.js: any legitimate future edit reddened CI, which is
+      # the INC-12 bug re-committed.
+      #
+      # THE REPAIR: assert the INVARIANT, not the CALENDAR. What G8 legitimately
+      # protects is the verifier's OWN side effects -- it mutates files during
+      # mutation testing and must restore every one. G8 now compares a start-of-run
+      # SNAPSHOT against the bytes on disk at the end:
+      #
+      #   bytes moved DURING OUR OWN RUN          -> FATAL (still bites)
+      #   differs from the recorded reference but
+      #     STABLE across our run = an OWNER EDIT -> PROVENANCE, never fatal
+      #
+      # This step guards that repair. Its G0 gate is STATIC and needs no siblings,
+      # so it is green on a bare checkout (which is all CI clones) while still going
+      # RED if the repair is stripped -- it cannot become the permanently-red INC-11
+      # bug it diagnoses. The behavioural witnesses report SKIPPED here (never a
+      # pass, never a hard failure).
+      #
+      # Anti-weakening is gated: simply DELETING G8 would also have turned the red
+      # gate green, and it FAILS the INC-23 G5 witness. Correction, not cover-up.
+      - name: Run the INC-23 gate (the drift gate must not punish an owner's billing repair)
+        run: python3 artifacts/incident/verify_inc23_drift_gate_punishes_owner_fix.py
