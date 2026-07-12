@@ -94,3 +94,40 @@ jobs:
       # That was the INC-11 bug and is deliberately not re-committed.
       - name: Run the INC-15 cross-fleet discovery gate (a skip must never count as a pass)
         run: python3 artifacts/incident/verify_inc15_cross_fleet_discovery.py
+
+      # INC-18 (Fabric autonomous incident commander).
+      #
+      # The INC-9 verifier's cross-fleet gates G6a/G6b/G6c ASSERTED THAT THE
+      # OWNER-BLOCKED BILLING DEFECTS WERE STILL BROKEN:
+      #
+      #     leak == 25_500 and price_blind   /   batch_died   /   silent_null
+      #
+      # Those are merge-time facts frozen into permanent gates. The instant an
+      # owner lands the INC-6/INC-5/INC-8 repair that this commander has escalated
+      # for four consecutive runs, the assertions go false and THIS JOB goes hard
+      # RED on a repo where nothing is wrong -- for the sole reason that somebody
+      # finally did the thing we kept asking them to do. Worse, the INC-5 probe
+      # caught only KeyError, so a legitimate reject-loudly repair (raising a
+      # custom ValidationError) would have crashed the verifier outright.
+      #
+      # A gate that PUNISHES THE REMEDIATION IT EXISTS TO REQUEST teaches the team
+      # to ignore red CI -- the exact disease this fleet exists to cure. The repair
+      # REPORTS defect liveness as provenance and ENFORCES only the policy-free
+      # baseline (well-formed input must still price and aggregate correctly),
+      # which every candidate owner policy satisfies and the tempting broken
+      # repairs do not.
+      #
+      # This step guards that repair. It is green on a BARE CHECKOUT (6/6, exit 0),
+      # so it cannot become the INC-11 permanently-red bug it diagnoses.
+      #
+      # IMPORTANT -- why this verifier does NOT enforce source hashes:
+      # its first draft asserted hardcoded sha256 baselines and anchored its
+      # witness to the CURRENTLY deployed source. Both would have hard-reddened
+      # THIS JOB the moment an owner repaired a billing file, and the sha gate
+      # would additionally have failed every ordinary PR that edits session.js
+      # (the INC-12 padlock). Drift is therefore REPORTED, never enforced, and the
+      # witness is anchored to a frozen snapshot of the defect. Verified green in
+      # four scenarios: unchanged fleet, bare checkout, owners-repaired-everything,
+      # and a normal PR editing session.js.
+      - name: Run the INC-18 gate (a gate must never punish the fix it asks for)
+        run: python3 artifacts/incident/verify_inc18_gate_punishes_remediation.py
