@@ -57,6 +57,7 @@ Exit 0 = every gate passed.
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import re
 import shutil
@@ -87,6 +88,37 @@ TRACKED = [SRC, SUITE, CI, PKG, INC9]
 
 RESULTS: list[tuple[str, bool, str]] = []
 
+# INC-31 -- STOP THE STRICT-MODE FLAG LEAKING INTO CHILDREN.
+#
+# Strict cross-fleet mode is honoured through an environment variable. But
+# `subprocess.run()` WITHOUT `env=` hands the child the parent's ENTIRE
+# environment, so the flag leaks into children that must NOT receive it.
+#
+# G1 below spawns verify_inc9_ci_gate.py to ask exactly one question: "does the
+# shipped INC-9 verifier pass on this tree?" On a BARE CHECKOUT -- precisely
+# what this repo's CI clones -- INC-9 has no sibling repos, so it correctly
+# SKIPs its cross-fleet gates and exits 0. With the flag leaked in, the child
+# INHERITS it, is forced into strict mode, and HARD-FAILS for want of siblings
+# that are legitimately absent. G1 then reports "INC-9 does not pass" -- which
+# is false, and has nothing to do with the property G1 tests.
+#
+# THE RULE: an intent must be PASSED to the child that should receive it,
+# never INHERITED by a child that must not.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict[str, str]:
+    """A child environment with the strict flag ALWAYS scrubbed.
+
+    Re-set it only when the caller EXPLICITLY asks. This stops strict mode
+    leaking; it does not remove the feature.
+    """
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
 
 def gate(name: str, ok: bool, detail: str = "") -> None:
     RESULTS.append((name, ok, detail))
@@ -104,6 +136,7 @@ def npm_test(cwd: pathlib.Path) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         timeout=300,
+        env=child_env(),
     )
 
 
@@ -170,6 +203,7 @@ def main() -> int:
         capture_output=True,
         text=True,
         timeout=600,
+        env=child_env(),
     )
     gate(
         "G1 the merged INC-9 mutation-witness verifier passes on the current tree",
@@ -254,6 +288,7 @@ def main() -> int:
             capture_output=True,
             text=True,
             timeout=600,
+            env=child_env(),
         )
         vblob = new_ci_verifier.stdout + new_ci_verifier.stderr
 
