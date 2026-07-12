@@ -37,7 +37,8 @@ GATES
   G6  NEGATIVE CONTROL -- genuinely-absent siblings still SKIP (exit 0), so the
       repair does not leave `checkout-api` CI permanently red (the INC-11 bug)
   G7  strict mode refuses to pass un-run gates (exit 1, FATAL)
-  G8  no production drift: all 3 sources byte-identical to their baselines
+  G8  no SELF-INFLICTED drift: sources byte-identical across THIS run (start==end).
+      INC-20: an owner's INC-6/5/8 repair is reported as provenance, never failed.
 
 G5 is the load-bearing gate. It does not merely assert the new code works -- it
 proves the OLD code was blind on the SAME filesystem. Had both implementations
@@ -66,8 +67,14 @@ VERIFIER = CHECKOUT_API / "artifacts" / "incident" / "verify_inc9_ci_gate.py"
 TARGET = FLEET / "fabric-ic-incident-target"
 GATEWAY = FLEET / "fabric-gateway-demo"
 
-# Deployed revisions, recorded before this run touched anything. FULL sha256 --
-# a truncated prefix is a weaker assertion than the one we can trivially make.
+# Deployed revisions as of the INC-15 run. FULL sha256.
+#
+# INC-20: these are PROVENANCE REFERENCE values -- NOT a fatal contract.
+# A sibling source that differs from the value below is an OWNER EDIT (e.g. the
+# INC-6 / INC-5 / INC-8 billing repair this commander has requested for five
+# runs). Hard-failing on that would punish the remediation we exist to request
+# -- the INC-18 defect. What G8 enforces instead is SELF-DRIFT: production bytes
+# must not change BETWEEN this verifier's start and end. See G8 below.
 BASELINES = {
     CHECKOUT_API / "service" / "checkout" / "session.js":
         "b45a8eeceaa142dd70aea4182930d02edb2d23ce90f0f02527910abb5f18d7e8",
@@ -79,6 +86,20 @@ BASELINES = {
 
 RESULTS: list[tuple[str, bool, str]] = []
 SKIPPED: list[tuple[str, str]] = []
+
+
+def _snapshot() -> dict:
+    """sha256 of every deployed source PRESENT right now (absent != drift)."""
+    snap = {}
+    for path in BASELINES:
+        if path.is_file():
+            snap[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return snap
+
+
+# INC-20: taken BEFORE any gate runs, so G8 can prove OUR OWN mutation testing
+# restored everything it touched -- the property that actually matters.
+START_SNAPSHOT = _snapshot()
 
 
 def gate(name: str, ok: bool, detail: str = "") -> None:
@@ -443,25 +464,72 @@ def main() -> int:
         )
 
     # ------------------------------------------------------------------ G8 --
-    # Hash only the files that EXIST here. On a bare checkout the sibling sources
-    # are absent -- reading them raised FileNotFoundError and crashed the verifier
-    # in CI. An absent file is not drift; it is a different environment.
-    drift = []
-    checked = 0
-    for path, expected in BASELINES.items():
-        if not path.is_file():
-            continue
-        checked += 1
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
-        if actual != expected:
-            drift.append(f"{path.name}: {actual} != {expected}")
+    # INC-20 -- ASSERT THE INVARIANT, NOT THE CALENDAR.
+    #
+    # G8 used to require every deployed source to be byte-identical to a HARDCODED
+    # baseline. That predicate is a statement about the fleet's bug BACKLOG, not
+    # about correctness: the moment an OWNER lands the INC-6/5/8 billing repair we
+    # have spent five runs requesting, the sibling hash moves and this gate hard-
+    # reddens a repo where NOTHING IS WRONG. A gate that punishes the remediation
+    # it exists to request teaches the team to ignore the red -- the INC-18 defect,
+    # surviving in the sibling gate INC-18 did not touch.
+    #
+    # What G8 legitimately protects is OUR OWN side effects: this verifier mutates
+    # files during mutation testing and must restore every one. So compare the
+    # start-of-run snapshot with the bytes on disk NOW.
+    #
+    #   self-drift (bytes moved during OUR run) -> FATAL. Still bites.
+    #   owner edit (differs from the historical baseline, but stable across our
+    #               run)                        -> reported as provenance, never fatal.
+    #
+    # Hash only files that EXIST: on a bare checkout the siblings are absent, and
+    # an absent file is not drift -- it is a different environment.
+    end_snapshot = _snapshot()
+
+    self_drift = []
+    for path, started in START_SNAPSHOT.items():
+        now = end_snapshot.get(path)
+        if now is None:
+            self_drift.append(path.name + ": DELETED during this run")
+        elif now != started:
+            self_drift.append(
+                path.name + ": MUTATED during this run (" + started[:12] + " -> " + now[:12] + ")"
+            )
+    for path in end_snapshot:
+        if path not in START_SNAPSHOT:
+            self_drift.append(path.name + ": APPEARED during this run")
+
+    owner_edits = [
+        path.name + ": " + digest[:12] + " != historical " + BASELINES[path][:12] + " (OWNER EDIT)"
+        for path, digest in sorted(end_snapshot.items(), key=lambda kv: kv[0].name)
+        if digest != BASELINES[path]
+    ]
+
+    checked = len(end_snapshot)
+    if self_drift:
+        detail = "SELF-DRIFT (this verifier failed to restore what it mutated): " + "; ".join(
+            self_drift
+        )
+    else:
+        detail = (
+            str(checked)
+            + "/"
+            + str(len(BASELINES))
+            + " deployed sources present; byte-identical across this verifier's own run"
+            + " (start == end)"
+        )
+        if not siblings_present:
+            detail += " (siblings absent in this checkout: not drift)"
+        if owner_edits:
+            detail += "\n         PROVENANCE: " + "; ".join(owner_edits)
+        else:
+            detail += "; all still match the INC-15 historical baseline"
+
     gate(
-        "G8 NO PRODUCTION DRIFT — every deployed source PRESENT here matches its baseline",
-        not drift and checked > 0,
-        f"{checked}/{len(BASELINES)} sources present and byte-identical on the FULL sha256"
-        + ("" if siblings_present else " (siblings absent in this checkout: not drift)")
-        if not drift
-        else "; ".join(drift),
+        "G8 NO SELF-INFLICTED DRIFT -- this verifier restored every source it touched "
+        "(an owner repair is REPORTED, never punished)",
+        not self_drift and checked > 0,
+        detail,
     )
 
     # -------------------------------------------------------------- summary --

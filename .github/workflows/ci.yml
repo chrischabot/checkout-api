@@ -164,3 +164,48 @@ jobs:
       # present -- so this step cannot become the permanently-red INC-11 bug.
       - name: Run the INC-19 gate (witnesses must not depend on ambient layout or gate counts)
         run: python3 artifacts/incident/verify_inc19_layout_and_count_invariance.py
+
+      # INC-20 (Fabric autonomous incident commander, run 2026-07-12).
+      #
+      # INC-18 cured "the gate punishes the remediation it exists to request" in
+      # verify_inc9_ci_gate.py. The IDENTICAL defect survived in the sibling gate
+      # INC-18 did not touch: verify_inc15_cross_fleet_discovery.py's G8 required
+      # every deployed source to be byte-identical to a HARDCODED sha256 baseline.
+      #
+      # Measured this run BY EXECUTION. Simulate an owner landing the CORRECT INC-6
+      # repair -- the exact remediation this commander has escalated for five
+      # consecutive runs -- and on that healthy, correctly-repaired tree:
+      #
+      #     verify_inc15_cross_fleet_discovery.py       -> exit 1  [FAIL] G8
+      #     verify_inc19_layout_and_count_invariance.py -> exit 1  [FAIL] G1
+      #
+      # (INC-19's G1 merely re-runs the INC-15 verifier, so it inherited the
+      # failure: one root cause, two red gates.) The owner does the thing we keep
+      # asking for, and CI goes hard RED on a repo where nothing is wrong.
+      #
+      # THE REPAIR -- assert the invariant, not the calendar. What G8 legitimately
+      # protects is the verifier's OWN side effects: it mutates files during
+      # mutation testing and must restore every one. So it now compares a
+      # start-of-run snapshot against the bytes on disk at the end:
+      #
+      #     self-drift (bytes moved during OUR run) -> FATAL, still bites
+      #     owner edit (differs from the historical baseline, stable across our
+      #                 run)                        -> REPORTED, never fatal
+      #
+      # ANTI-WEAKENING is what makes this a correction rather than a cover-up:
+      # simply DELETING G8 would also turn the red gate green and would satisfy the
+      # necessity, sufficiency and divergence witnesses -- and it FAILS INC-20's G5,
+      # which requires a verifier that leaves production MUTATED across its own run
+      # to still be rejected. It still is. G6 additionally proves that tolerating an
+      # owner's hash change opened no correctness hole: the INC-18 baseline contract
+      # still rejects the tempting BROKEN repair (wrong price key -> charges $500.00
+      # where the contract requires $425.00).
+      #
+      # SAFETY: no production source is touched. On this bare CI checkout the
+      # sibling-dependent gates report SKIPPED (in neither the numerator nor the
+      # denominator -- never a pass, never a hard failure), while the STATIC G0
+      # still asserts the repair is present with no siblings required. Strip the
+      # repair and G0 goes RED here. So this step cannot become the INC-11
+      # permanently-red bug it diagnoses.
+      - name: Run the INC-20 gate (the drift gate must not punish an owner's repair)
+        run: python3 artifacts/incident/verify_inc20_drift_gate_punishes_owner_fix.py
