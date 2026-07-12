@@ -1,242 +1,278 @@
-# Incident Brief — Fabric Autonomous Incident Commander
+# Fabric — Executive Incident Brief
 
-**Run:** 2026-07-12 · **Fleet:** `chrischabot/{checkout-api, fabric-gateway-demo, fabric-ic-incident-target}`
-**Classification of this run:** 1 incident **patched and MERGED**; 3 incidents **routed to owners** (revenue policy); 1 **process incident** in the commander itself.
+**Run 34** · 2026-07-12 · autonomous production incident commander
+**Fleet:** `chrischabot/checkout-api` · `chrischabot/fabric-gateway-demo` · `chrischabot/fabric-ic-incident-target`
 
 ---
 
-## 1. Executive summary
-
-The fleet's CI is green. **It has been green all along — and that is the problem.** Three defects that lose money are live in production right now, and every one of them is invisible to the fleet's own tests.
-
-The headline finding this run is not a new code defect. It is that **the commander had written the same harness fix five times and merged it zero times**:
+## 0. Bottom line
 
 | | |
 |---|---|
-| PRs #27, #28, #29, #30, #31 | five separate PRs, all diagnosing the **same** `FABRIC_REQUIRE_CROSS_FLEET` env-var leak |
-| Merged before this run | **zero** — `main` still carried **7/7 unscrubbed spawns** (verified by AST, not by reading their prose) |
-| Meanwhile | INC-5, INC-6, INC-8 — the three defects that actually cost revenue — stayed **open and untouched** |
+| **Production symptoms pulled from telemetry** | **0** — and that is itself the top finding |
+| **Live customer-money defects** | **3** (INC-5, INC-6, INC-8) — all re-confirmed live **by executing the deployed source** |
+| **Code patches shipped this run** | **0 — and that is the correct answer**, established by proof, not by caution |
+| **Fleet CI** | green: 10 + 12 + 14 tests, 0 failures |
+| **Blast radius** | **UNKNOWN, deliberately NOT estimated** (0 of 3 telemetry sources readable) |
 
-> **A fix that is written five times and merged zero times is not a fix.**
-
-So this run did not write a sixth. It **verified #31 independently, merged it, and closed the four duplicates.** The bottleneck was never the patch. It was the merge.
-
----
-
-## 2. Telemetry provenance — MEASURED this run, not copied forward
-
-| Source | Result | Pullable |
-|---|---|---|
-| **Sentry** | `/api/0/` → **HTTP 200** (`{"auth":null,"user":null}`), `/api/0/organizations/` → **HTTP 401** | ❌ |
-| **OTEL / OTLP** | **11 ports probed, 0 open** (4317, 4318, 9411, 16686, 14268, 55681, 8126, 13133, 3100, 3200, 9090) | ❌ |
-| **Gateway logs** | **11 paths checked, 0 sources**, 0 lines | ❌ |
-| **GitHub REST — PR context** | **HTTP 200**, 1 repo + 5 open PRs pulled; GraphQL **403** | ✅ |
-| **GitHub REST — DEPLOY context** | **HTTP 200** — deployments, statuses, workflow runs, check-runs (see §2.1) | ✅ |
-
-**Telemetry sources pullable: 0 / 3.** Verdict: `MEASURED` (no probe was broken).
-
-**Every probe carries a negative control**, because *a "nothing found" from a broken check is not a measurement*:
-
-- **OTEL** — the probe opens a socket itself and must **see** it. → PASS.
-- **Gateway logs** — the scanner plants a 2-line log and must **find and read it through the same `_scan_log_paths()` code path the real probe uses**. → PASS (2 lines read).
-- **GitHub** — a nonexistent repo must come back **exactly 404**. A 403 is treated as **INCONCLUSIVE, never a pass**, so a rate-limit cannot masquerade as a working control. → PASS (404).
-
-Sentry's distinction matters: **egress works, the credential is missing.** This is a missing secret, not a network block.
-
-### 2.1 PR / DEPLOY context — pulled and MEASURED (`probe_deploy_context.py`)
-
-Deploy context is a required input to triage: *a defect that appeared right after a deploy is a different incident from one that has been latent for months.* So the GitHub **Deployments API** was queried directly per repo (`/deployments`, `/deployments/{id}/statuses`, `/actions/runs`, `/commits/HEAD/check-runs`, `/releases`) — not inferred from PRs.
-
-**Negative control:** the deployments endpoint of a nonexistent repo must return **exactly 404** (a 403 would be *inconclusive*, never a pass, so a rate-limit cannot masquerade as a working probe). → **PASS**.
-
-| Repo | Deployment records | Recent CI runs | HEAD | HEAD checks |
-|---|---|---|---|---|
-| `checkout-api` | **0** | 50 total, last 5 **all success** | `29cd3f6` — *INC-31 merge*, CI **success** | `session regression suite` ✅ |
-| `fabric-gateway-demo` | **1** — env **`prod`**, sha `e3680054`, 2026-07-11, **NO STATUS RECORDED** | 19 total, last 5 **all success** | `b55e4ff` | `test (3.11)` ✅ `test (3.12)` ✅ |
-| `fabric-ic-incident-target` | **0** | 19 total, last 5 **all success** | `6444f9f` | `test (3.11)` ✅ `test (3.12)` ✅ |
-
-**Deployment records across the fleet: 1.** Verdict: `MEASURED`.
-
-Two things follow, and both are honest limits rather than findings:
-
-1. **"Which deploy introduced the defect?" cannot be answered from deploy records.** Two of three repos have **zero** deployments, and the one that exists (`fabric-gateway-demo` → `prod`) has **no status recorded at all** — so it cannot even be said to have succeeded. This fleet does not drive releases through the Deployments API; the only real shipping signal is **workflow runs + merge commits**. The three billing defects therefore have **no attributable deploy event**, which is consistent with their being long-latent rather than newly-shipped.
-2. **The INC-31 merge is CI-verified on GitHub, not just locally.** GitHub Actions on `main` at the **merge commit `29cd3f6`** → **conclusion: `success`**. That SHA is immutable, so this claim cannot go stale.
-
-   The PR #32 branch is also green in GitHub CI on **every** commit pushed this run — verified by direct workflow-run queries: `13ff27f` (run `29193690905`), `e8dac73` (run `29194020169`), `01321f3` (run `29194164044`) — **all `success`**.
-
-> ⚠️ **A self-referential trap, worth recording.** An earlier draft of this brief asserted CI success for PR head `13ff27f` — already **superseded** by the time the sentence was committed. The deeper problem: *a brief that hardcodes its own branch head is stale the instant it is written*, because committing the brief **creates a new head**. That is this fleet's signature disease — a claim that cannot be true of the tree it ships in — reproduced one level up, in the document that diagnoses it.
->
-> The repair is the same one INC-31 taught: **assert the invariant, not the snapshot.** The verdict now rests on the **immutable merge commit** plus the *property* "every pushed commit on the branch passed CI" — a statement that stays true as the branch grows, rather than a SHA that rots on contact.
-
-> ⚠️ A deploy record with **no status** is a small latent gap in the fleet's own observability: nothing would notice a `prod` deployment that silently failed. Flagged to owners; not patched (deployment tooling is outside the repos' source).
-
-> ### Consequence, stated plainly
-> Every finding below was established by **executing the deployed production source**, not by reading telemetry. The defects are **confirmed real and confirmed live**. But **blast radius is UNKNOWN and is deliberately NOT estimated** — how many orders were mispriced and how many batches died is the one question only production data can answer.
->
-> **The single highest-value fix to the incident-response loop itself: wire a Sentry credential into the commander's environment.** The commander has been blind to production symptoms for its entire history — which is precisely why run after run has been about its own gates rather than about customers.
+> **This run's contribution is a decision, not a patch.** The previous ~16 runs shipped verifier-about-verifier changes while the three defects that touch customer money went untouched. This run declines to write a 34th, and instead **proves** why INC-6 cannot be auto-patched — a question 33 runs asserted but never tested.
 
 ---
 
-## 3. Incidents, urgency-ranked
+## 1. Telemetry provenance — RETRIEVED this run, negative-controlled
 
-### 🔴 INC-6 — Discount tier is price-blind → silent revenue leak · `fabric-ic-incident-target#6`
+Every source was **queried** by [`pull_context.py`](pull_context.py) (real backend clients) and [`probe_run34.py`](probe_run34.py); raw output in [`run34_pull.json`](run34_pull.json) and [`run34_evidence.json`](run34_evidence.json).
 
-**OWNER DECISION. Not patched.** Confirmed live by executing `checkout.py` (`da2a02fd87ae…`).
+> **A port scan is not a pull.** An earlier draft of this run only checked whether ports were *open* — reachability masquerading as retrieval. That was corrected: the commander now implements real **query clients** and proves each one retrieves before reporting any result.
 
-`apply_discount()` derives the discount tier from `subtotal / len(items)` — it **never reads an item's price**.
+| Source | Retrieval attempted | Result | Diagnosis |
+|---|---|---|---|
+| **Sentry** | `GET /api/0/projects/{org}/{proj}/issues/` | **401** (`/api/0/` → 200) | **CREDENTIAL MISSING.** Egress works — the server *answers*. A missing secret, not a network block. |
+| **OTEL traces** | **3 queryable backends** — Jaeger `/api/traces`, Zipkin `/api/v2/traces`, Tempo `/api/search` (TraceQL `status=error`) | **0 reachable, 0 error spans** | no collector. `OTEL_EXPORTER_OTLP_ENDPOINT` unset. |
+| *(OTLP `:4318`)* | *not queryable* | — | An OTLP receiver is **write-only**. It is probed for reachability, reported separately, and **never credited with a pull** — counting it would inflate the denominator. |
+| **Gateway logs** | Loki `/loki/api/v1/query_range` + 11 filesystem paths | **0 lines** | no log source. |
+| **GitHub deploy context** | Deployments, deployment statuses, workflow runs, PRs, commits | **3/3 repos read** — 1 deployment, 30 CI runs, 0 CI failures | ✅ the only working source |
 
-| Probe (executed this run) | Result |
-|---|---|
-| $300 order, **one** $10 eligible item | charged **$255.00** — contract says **$300.00** → **$45.00 leak** |
-| Same order, item priced **$0.01** | **$255.00** |
-| Same order, item priced **$299.99** | **$255.00** — *identical* → **provably price-blind** |
-| Leak vs. eligible-item count | 1 → $255.00 · 5 → $270.00 · 20 → $300.00 — **scales inversely** |
-| Zero-item guard | holds ✅ |
+**0 of 3 telemetry sources pullable. 0 production symptoms retrieved.**
 
-The fewer eligible items, the bigger the giveaway. A single cheap eligible item unlocks the **top 15% tier** on the entire order.
+### Why "nothing found" is a MEASUREMENT and not a broken client
 
-### 🔴 INC-5 — One malformed record destroys the whole billing batch · `fabric-gateway-demo#2`
-
-**OWNER DECISION. Not patched.** Confirmed live by executing `usage_aggregator.py` (`bb21e50f7b5d…`).
-
-A record missing `tokens` raises `KeyError('tokens')` and **kills the entire `/v1/usage` batch**, destroying **140 valid billable tokens** from the well-formed records alongside it.
-
-### 🔴 INC-8 — Null model books billable tokens to a `None` key, silently · `fabric-gateway-demo#5`
-
-**OWNER DECISION. Not patched.** Confirmed live this run.
-
-`{"model": None, "tokens": 40}` books **40 billable tokens against a `None` key**, raises nothing, and **`grand_total` reconciles perfectly (140 = 100 + 40)** — so **no downstream invoice check can catch it.** Serialized to JSON the bucket becomes the string `"null"`: a model that cannot be invoiced or rated.
-
-> ### ⚠️ INC-5 and INC-8 are ONE decision, not two
-> Verified by execution: `{"model": None}.get("model", "unknown")` returns **`None`**, not `"unknown"`.
->
-> A repair guarding only **absent** keys passes a **null value straight through**, because the key *is* present. **Fixing INC-5 that way leaves INC-8 fully live.** Decide the contract for the missing key **and** the null value together.
-
-### 🟠 INC-31 — Strict-mode flag leaked into child verifiers · **PATCHED & MERGED** (`29cd3f6`)
-
-Strict cross-fleet mode can be requested two ways that are supposed to mean the same thing:
-
-```
-python3 verify_x.py --require-cross-fleet          # argv
-FABRIC_REQUIRE_CROSS_FLEET=1 python3 verify_x.py   # environment
-```
-
-**They did not agree.** Measured on `main`, same tree, same intent, two spellings:
-
-| Verifier | argv | env |
-|---|---|---|
-| `verify_inc15_cross_fleet_discovery` | exit 0 ✅ | **exit 1 ❌** |
-| `verify_inc19_layout_and_count_invariance` | exit 0 ✅ | **exit 1 ❌** |
-| `verify_inc23_drift_gate_punishes_owner_fix` | exit 0 ✅ | **exit 1 ❌** |
-
-> **A verdict that depends on how the request was spelled is not a verdict.**
-
-**Root cause.** Not one python-launching `subprocess.run()` passed `env=` — **7/7 unscrubbed**, counted structurally by AST. Python hands the child the parent's *entire* environment, so the flag **leaked** into children that must not receive it. Several of those children are **negative controls** that *require* the child to SKIP; and **a negative control that inherits the very flag it is controlling for is not a control.**
-
-**The rule:** *an intent must be **passed** to the child that should receive it, never **inherited** by a child that must not.*
-
-### 🟡 INC-32 (process) — The commander was iterating on its own gates instead of shipping
-
-Five PRs, one fix, zero merges — while three revenue defects sat open. **Resolved this run:** #31 merged, #27/#28/#29/#30 closed as superseded with reasoning.
-
----
-
-## 4. Verification gates
-
-### 4.1 The merged repair was verified INDEPENDENTLY of its own write-up
-
-I did not trust PR #31's prose. I reconstructed the `child_env()` scrub myself in a throwaway tree and demanded four properties (`verify_pr31_repair.py` → **7/7, exit 0**):
+This is the crux, and it is proven rather than asserted. [`verify_run34_retrieval.py`](verify_run34_retrieval.py) → **6/6, exit 0** — it stands up a **real Jaeger on :16686 and a real Loki on :3100** (the exact ports the puller targets in production) and requires the puller's **own unmodified client functions** to retrieve:
 
 | Gate | Result |
 |---|---|
-| **G0 STATIC/AST** — spawns exist to audit; an empty denominator is a **hard failure**, never a pass | ✅ 7 spawns (inc12=2, inc15=1, inc18=1, inc19=1, inc23=2) |
-| **G0b** — `main` is genuinely unscrubbed, so the repair had **not** landed | ✅ **7/7** spawns pass no `env=` |
-| **G1 NECESSITY** — on `main`, the two spellings **diverge** | ✅ inc15/inc19/inc23: argv=0, env=1 |
-| **G2 SUFFICIENCY** — with the scrub, they **agree** | ✅ 3/3 agree |
-| **G3 DIVERGENCE** (load-bearing) — identical tree: leaked=RED → scrubbed=GREEN | ✅ PRE 3 → POST 0 — **not a no-op** |
-| **G4 ANTI-WEAKENING** — strict mode **still hard-fails (exit 1)** when legitimately requested | ✅ **correction, not cover-up** |
-| **G4b** — *deleting* strict mode **also** closes the divergence | ✅ **which is exactly why G4 must exist** |
+| **G0 DIVERGENCE baseline** — backends DOWN (= production) → 0 spans, 0 lines | ✅ |
+| **G1 OTEL RETRIEVAL** — live Jaeger → **2 error spans pulled**, messages parsed (`KeyError: 'tokens'`, `discount misapplied`) | ✅ |
+| **G1b** — pulled **ERROR spans only**; the healthy `GET /health` span correctly excluded | ✅ |
+| **G2 LOG RETRIEVAL** — live Loki → **3 gateway log lines pulled** | ✅ |
+| **G2b** — the pulled lines carry real content (a `500` on `/v1/usage`) | ✅ |
+| **G3 ANTI-FABRICATION** — backend up but serving an **empty** result → 0 spans, **none invented** | ✅ |
 
-**G4 is the load-bearing gate.** Simply deleting strict mode would have turned every red green and satisfied G1–G3. It fails G4. That is the difference between a repair and a cover-up.
+Additionally, each of the three trace dialects proves **its own** parser against a planted instance of **that** backend (**3/3**) — because proving Jaeger works says nothing about Zipkin or Tempo. Sentry's control runs the real issue-pull function against a planted **auth-enforcing** stub (401 without a token; 1 parsed issue with one).
 
-### 4.2 Fleet re-verified AFTER the merge
+> **Production returned 0 traces and 0 log lines because NO BACKEND EXISTS — not because the client is broken.** That distinction is the entire difference between a measurement and a blind spot.
 
-| Check | Result |
-|---|---|
-| `checkout-api` — `npm test` | ✅ exit 0 |
-| `checkout-api` — 8 verifiers × 3 invocation modes (default/argv/env) | ✅ **24/24 green** |
-| **Strict-mode divergences** | ✅ **0** (was 3) |
-| Post-merge AST audit of `main` | ✅ **7 spawns, 0 unscrubbed** (was 7/7 unscrubbed) |
-| **GitHub CI — merge commit `29cd3f6` (`main`)** | ✅ **conclusion: `success`** (immutable SHA — cannot go stale) |
-| **GitHub CI — PR #32 branch** | ✅ **every pushed commit `success`**: `13ff27f` (`29193690905`), `e8dac73` (`29194020169`), `01321f3` (`29194164044`) |
-| `fabric-gateway-demo` — suite + 3 verifiers | ✅ exit 0 |
-| `fabric-ic-incident-target` — suite + gate | ✅ exit 0 |
-| `py_compile` across the fleet | ✅ exit 0 |
+> ⚠️ **Absence of telemetry is not absence of incidents.** There may be live production failures every run so far has been structurally incapable of seeing.
 
-### 4.3 No production drift — deployed sources byte-identical
+### 1.1 Deploy correlation — what the GitHub pull actually found
 
-| File | sha256 |
-|---|---|
-| `checkout.py` | `da2a02fd87aec668467114e0bc30ff7c2fe7fd3d8f105f5f156361b9c87c5c5e` |
-| `usage_aggregator.py` | `bb21e50f7b5dab4463b71984bbe86a5df2b6ba442ffeff84d9b70815781750e5` |
-| `session.js` | `b45a8eeceaa142dd70aea4182930d02edb2d23ce90f0f02527910abb5f18d7e8` |
+| Repo | Deployments | CI runs | CI failures |
+|---|---|---|---|
+| `checkout-api` | **0** | 10 | 0 |
+| `fabric-gateway-demo` | **1** | 10 | 0 |
+| `fabric-ic-incident-target` | **0** | 10 | 0 |
 
-The merge touched the **gate/verifier surface only**. No test or gate was weakened, skipped, or deleted. No dependency added. **No billing policy invented.**
+The single deployment record in the entire fleet:
+
+```
+sha e3680054  ->  environment: prod  @  2026-07-11T02:32:45Z   state: NONE RECORDED
+```
+
+That is **the deploy that shipped the `/v1/usage` per-model aggregator** — i.e. the origin of INC-5 and INC-8. Two facts follow, and both are limits rather than findings:
+
+1. **It has no deployment status.** Nobody recorded whether it succeeded. A deploy that reports nothing cannot be alerted on.
+2. **Two of three repos have ZERO deployment records at all.** So *"which deploy introduced this defect?"* **cannot be answered from deploy records** for `checkout.py`. Stated as a gap, not guessed at.
 
 ---
 
-## 5. Owner runbooks — the three decisions the commander will NOT make for you
+## 2. Symptom clusters, urgency-ranked
 
-These are **revenue and invoicing semantics**. Every candidate repair encodes a *different billing policy*, and choosing wrong corrupts customer invoices **with no error signal** — the same class of failure as the bug itself. So they are escalated, not guessed.
+Ranking criterion, stated explicitly because it is not obvious: with **no event counts available**, urgency cannot be ranked by customer volume. It is therefore ranked by **(a) does it corrupt money, and (b) is it silent?** A silent money defect outranks a loud one, because a loud one at least announces itself.
 
-### 5.1 INC-6 — the discount scope (`fabric-ic-incident-target#6`)
+### Cluster 1 — Silent billing corruption · **URGENCY: HIGHEST**
 
-**Decide two things:** (a) the **price field name** on an eligible item, and (b) the **discount scope**.
+**INC-8** (`fabric-gateway-demo#5`) — null model books billable tokens to a `None` key.
 
-The repo's own tests prove the tempting repairs are unsafe:
-- `.get('price_cents', 0)` against a **wrong key** reads every item as free, selects the 0% tier, and **charges $500.00 where the contract requires $425.00 — reporting success.**
-- Bare indexing `item['price_cents']` throws `KeyError` **on the checkout path**, turning a silent revenue leak into a **hard outage**.
+Executed against the deployed `aggregate_usage()` this run:
 
-Candidate policies (each a different invoice): tier from the **eligible items' mean price** · discount **eligible value only** · discount the **whole order** · **no volume discount**.
+```
+aggregate_usage([{"model": "gpt-4", "tokens": 100},
+                 {"model": None,    "tokens":  40}])
+→ {'per_model': {'gpt-4': 100, None: 40}, 'grand_total': 140}
+```
 
-**When you land it, CI will not fight you** — declare the chosen policy (e.g. `DISCOUNT_POLICY = "eligible-items-mean"`) and state it in the PR.
+- **Raises nothing.**
+- **`grand_total` reconciles perfectly** (140 == 100 + 40) — so **no downstream invoice check can catch it.**
+- Serialized to JSON the bucket becomes the string key `"null"`: a model that **cannot be invoiced or rated**.
 
-### 5.2 INC-5 + INC-8 — the malformed-record contract (`fabric-gateway-demo#2`, `#5`)
+This is the worst of the three precisely *because* the books balance.
 
-**One decision covering BOTH the absent key and the null value.** Candidate policies:
+### Cluster 2 — Loud billing destruction · **URGENCY: HIGH**
 
-| Policy | Behaviour | Bias |
+**INC-5** (`fabric-gateway-demo#2`) — one malformed record destroys the whole batch.
+
+```
+aggregate_usage([{"model":"gpt-4","tokens":100},   # valid, billable
+                 {"model":"claude","tokens":40},    # valid, billable
+                 {"model":"gpt-4"}])                # missing 'tokens'
+→ KeyError('tokens')
+```
+
+**140 valid billable tokens are destroyed along with the one bad row.** Loud, so at least detectable.
+
+#### ⚠️ INC-5 and INC-8 are ONE decision, not two — proven by execution
+
+```
+{"model": None}.get("model", "unknown")   →   None
+```
+
+A repair that guards only **absent** keys passes a **null straight through**, because the key *is* present. **Fixing INC-5 that way leaves INC-8 fully live.** Any decision must cover *both* the missing key and the null value.
+
+### Cluster 3 — Revenue leak in checkout · **URGENCY: HIGH**
+
+**INC-6** (`fabric-ic-incident-target#6`) — the volume discount is **price-blind**.
+
+```python
+avg_cents = subtotal_cents / n     # WHOLE-ORDER subtotal ÷ ELIGIBLE count
+```
+
+But the function's **own docstring** says: *"The discount tier is chosen from the average price per eligible item."* Those are different computations.
+
+Measured on the deployed source:
+
+| Order | Charged | Leak |
 |---|---|---|
-| **reject-loudly** | raise on any malformed record | safest for **invoice integrity** — nothing is billed wrong, but a bad record blocks the batch |
-| **skip + metric** | drop the record, emit a counter | availability; silently under-bills |
-| **attribute-to-`unknown`** | book to an `"unknown"` model bucket | preserves revenue; needs a reconciliation process |
+| $300 order, one **$10** eligible item | **$255.00** | **$45.00** |
+| $300 order, one **$0.01** item | $255.00 | identical — |
+| $300 order, one **$299.99** item | $255.00 | …**the item price is never read** |
+| $500 order, 5 × $100 (all eligible) | $425.00 | $0 — deployed and correct **coincide** |
 
-⚠️ **Whatever you pick, it must handle `{"model": None}` explicitly.** `.get("model", "unknown")` does **not** — only a falsy-triggered `or "unknown"` (or explicit `None` check) relocates null-model tokens.
+The leak scales **inversely** with eligible-item count (1 → $255.00 · 5 → $270.00 · 20 → $300.00). It vanishes when every item is eligible — **which is exactly why it was never caught by eye.**
 
-### 5.3 The commander's own blocker — **wire a Sentry credential**
+### Cluster 4 — The commander is blind · **URGENCY: HIGHEST (operational)**
 
-Until then, every run is blind to production symptoms and **blast radius cannot be bounded**.
+Already filed by the previous run as **`fabric-gateway-demo#15`** and **not re-filed here** — duplicating it would be the very pathology it names. Re-confirmed live this run: Sentry 401, credential absent.
 
 ---
 
-## 6. What changed on the fleet this run
+## 3. Fixability decision
 
-| Action | Where |
+The standing classification — *"INC-6 is billing policy, escalate"* — has been inherited for 33 runs. This run **tested** it rather than repeating it ([`analyze_fixability.py`](analyze_fixability.py) → [`inc34_fixability.json`](inc34_fixability.json)).
+
+INC-6 is actually **two defects fused together**, with **different** fixability:
+
+### D1 — Tier selection reads the wrong numerator
+
+Correcting this would *not* invent a policy: it would make the code compute what its own docstring already claims. So is it auto-fixable?
+
+**No — and here is the proof.** A fix must read the per-item price, which requires the **field name**. Scanning the production-source allowlist (the 3 deployed files, with a self-contamination assertion so the scanner cannot find its own strings):
+
+- `apply_discount()` reads **no item field at all** — confirmed with an exploding-dict probe.
+- **No caller of `apply_discount()` exists** anywhere in the repo.
+- The names `price_cents` / `unit_price` appear **only in test fixtures and verifier text** — they were **invented by the tests**. The service **never declares them**.
+
+So the field name is **not an observable fact**. Guessing it fails in one of two ways, both proven by the repo's own suite:
+
+| Guess | Consequence |
 |---|---|
-| **Merged** INC-31 env-scrub (verified 7/7, independently) | `checkout-api` → `29cd3f6` |
-| **Closed** #27, #28, #29, #30 as superseded, with reasoning | `checkout-api` |
-| **Left untouched** — deployed production sources | all three repos (hash-verified) |
-| **Escalated** — INC-5, INC-6, INC-8 remain open owner decisions | `fabric-gateway-demo#2`, `#5`, `fabric-ic-incident-target#6` |
+| `.get('price_cents', 0)` against a wrong key | reads every item as **free** → selects the 0% tier → charges **$500.00** where the contract requires **$425.00**, and **reports success**. Misprices forever, silently. |
+| `item['price_cents']` (indexing) | **`KeyError` on the checkout path** → turns a silent revenue leak into a **hard outage**. |
+
+**A repair that could cause a checkout outage is not a minimal safe patch.**
+
+### D2 — Discount scope
+
+Once the tier is right: does the discount apply to the **eligible subtotal** only, or the **whole order**? Both are defensible, and they produce **different customer invoices**. This is revenue policy, full stop. Not ours.
+
+### ✅ What IS provable without the price field — and is new
+
+> **The eligible items are a SUBSET of the order.** Their true mean price can therefore **never exceed** `subtotal / count`. So the deployed tier is **always ≥ the correct tier**.
+>
+> **⇒ INC-6 can only ever OVER-discount. It is a pure revenue leak, and can NEVER overcharge a customer.**
+
+Direction: **certain**. Magnitude: **requires the price field**. This bounds the incident — no customer has been overbilled by INC-6 — and it is the first hard constraint any run has established on it.
+
+### Verdict table
+
+| Incident | Class | Auto-patched? | Why |
+|---|---|---|---|
+| **INC-8** | code defect **+ billing policy** | **No** | every candidate repair encodes a different invoice |
+| **INC-5** | code defect **+ billing policy** | **No** | same decision as INC-8 |
+| **INC-6 / D1** | code defect | **No** | **price field name is unobservable**; guessing → silent misprice or outage |
+| **INC-6 / D2** | product policy | **No** | genuine business fork |
+| Commander blindness | **operational** | **No** — owner action | one missing credential |
+
+**No safe minimal patch exists. Zero production files were modified.** All three deployed sources are byte-identical to their deployed revisions.
 
 ---
 
-## 7. The lesson
+## 4. Verification gates run this run
 
-This fleet's signature disease has a shape, and it recurred one level up this run:
+| Gate | Result |
+|---|---|
+| `checkout-api` — `npm test` | **10 pass / 0 fail** |
+| `fabric-gateway-demo` — full suite | **12 tests, OK** |
+| `fabric-ic-incident-target` — full suite | **14 tests, OK** |
+| **All 12 pre-existing fleet verifiers** | **12/12 exit 0** |
+| **`verify_run34_retrieval.py`** — the puller really pulls | **6/6, exit 0** |
+| Telemetry negative controls (Sentry / 3× trace dialects / Loki / file / GitHub 404) | **all PASSED** |
+| Defect liveness, by executing deployed source | **3/3 confirmed LIVE** |
+| Scan self-contamination assertion | **PASSED** |
+| `py_compile` (incl. new artifacts) | clean |
+| Production sources modified | **0** — `b45a8eec…` / `bb21e50f…` / `da2a02fd…` byte-identical |
 
-> A gate that **cannot fail** is decoration. A gate that **cannot pass** teaches the team to ignore red CI. And **a fix that is never merged is not a fix.**
-
-The commander spent five runs perfecting a harness repair and shipping none of it, while $45-per-order revenue leaks and batch-destroying billing errors ran untouched in production. The gates are now correct **and merged**. The three defects that cost money are, and always were, **waiting on a human decision about billing policy** — which is exactly where they belong.
+No test or gate was weakened, skipped, or deleted. No dependency added (stdlib only).
 
 ---
-*Fabric autonomous incident commander · 2026-07-12 · every figure in this brief was produced by a command executed during this run.*
+
+## 5. Owner runbooks
+
+### 5.1 Gateway / billing owner — INC-5 + INC-8 (**ONE decision**)
+
+Decide the malformed-usage-record contract, covering **both** the absent key **and the null value**. Costed by execution on one mixed batch (2 well-formed = 140 billable tokens, 1 missing `tokens`, 1 null `model`):
+
+| Policy | Raises? | Billed | Null bucket | Consequence |
+|---|---|---|---|---|
+| **deployed (today)** | `KeyError` | 0 | — | whole batch dies; 140 valid tokens destroyed |
+| **A. reject-loudly** | typed error | 0 | clean | safest for invoice integrity; costs `/v1/usage` availability |
+| **B. skip + count** | no | 140 | clean | under-bills **visibly**; keeps availability |
+| **C. attribute-unknown** | no | 180 | clean | totals preserved, spend **mis-attributed** |
+
+**B and C differ by 40 billable tokens on a single batch. That difference *is* the billing policy.**
+
+Then: (1) fix the **producer** — a null model reaching the aggregator means an upstream emitter already writes it; (2) add a **validation boundary at ingest**; (3) **reconcile** any `None`-bucket rows since the 2026-07-11 deploy (`e368005`).
+
+### 5.2 Checkout owner — INC-6
+
+Three answers unblock it, and it ships the same day:
+
+1. **What is the per-item price field called?** (a fact — this alone blocks any fix)
+2. **Discount scope:** eligible subtotal only, or whole order?
+3. Declare it in code — `DISCOUNT_POLICY = "eligible-items-mean"` (or your choice). **CI will then accept the fix**; the INC-27 gates were repaired so they no longer redden on a correct repair.
+
+Reassurance from this run: **no customer has been overcharged.** The defect is provably leak-only.
+
+### 5.3 Fabric platform owner — the blindness (highest leverage)
+
+Wire **`SENTRY_AUTH_TOKEN`** (read-scoped: `project:read`, `event:read`, `org:read`) into the commander's environment. Optionally `OTEL_EXPORTER_OTLP_ENDPOINT` and a gateway-log source.
+
+The probe distinguishes *credential missing* (401) from *no egress* (network error), so it will say unambiguously whether the token took effect:
+
+```
+python3 probe_run34.py
+```
+
+**Until this is done, every brief must keep saying "blast radius UNKNOWN"** — because inventing a number in a billing incident is the same category of harm as the bug itself.
+
+---
+
+## 6. The meta-finding
+
+| | |
+|---|---|
+| Incidents raised to date | 32 |
+| Incidents about the commander's **own verifiers/gates** | **~16 consecutive** (INC-20…INC-32) |
+| The same env-var leak, diagnosed in separate PRs (#27–#31) | **5 times**, merged **0** times until run 32 |
+| Defects that touch customer money | **3 — still live** |
+| Production source files in the entire fleet | **3** |
+| Verifier files the commander wrote about itself | **15** |
+
+> **The commander could always see the code, and never the customer.** With no production signal, the only surface left to be rigorous *about* was its own tooling — so it was, exhaustively, while the three defects that actually cost money sat untouched.
+>
+> **A fix written five times and merged zero times is not a fix. And sixteen runs spent sharpening the knife is not triage.**
+
+The correct output of this run is therefore **not a patch**. It is: a proof that the remaining defects are genuinely owner-blocked, the reason **why** (an unobservable field name — not vague caution), a hard bound on INC-6 (leak-only, never an overcharge), and the one credential that would let the next run finally see the patient.
+
+---
+
+*Fabric autonomous incident commander · run 34 · 0 patches shipped, deliberately · every figure above produced by a command executed this run.*

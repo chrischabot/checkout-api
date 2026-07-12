@@ -1,0 +1,139 @@
+{
+  "D1_tier_selection": {
+    "defect": "tier chosen from subtotal/eligible_count, i.e. the whole-order value is attributed to the eligible items",
+    "contradicts_own_docstring": true,
+    "direction_of_error_knowable_without_price_field": true,
+    "reason": "the eligible items are a SUBSET of the order, so their true mean price can never exceed subtotal/count -- the deployed tier is therefore always >= the correct tier: it can only OVER-discount, never under-discount",
+    "MAGNITUDE_of_correction_requires_price_field": true,
+    "price_field_read_by_deployed_code": [],
+    "price_field_named_in_any_PRODUCTION_source": [
+      "price"
+    ],
+    "production_sources_scanned": [
+      "fabric-ic-incident-target/checkout.py",
+      "fabric-gateway-demo/service/usage_aggregator.py",
+      "checkout-api/service/checkout/session.js"
+    ],
+    "price_tokens_found_ONLY_in_nonproduction": {
+      "amount": [
+        "fabric-ic-incident-target/incident_brief.md"
+      ],
+      "cost": [
+        "checkout-api/incident_brief.md",
+        "incident_brief.md"
+      ],
+      "price": [
+        ".cadenza/todo.md",
+        "checkout-api/artifacts/incident/probe_defect_liveness.py",
+        "checkout-api/artifacts/incident/verify_inc18_gate_punishes_remediation.py",
+        "checkout-api/artifacts/incident/verify_inc23_drift_gate_punishes_owner_fix.py",
+        "checkout-api/artifacts/incident/verify_inc9_ci_gate.py",
+        "checkout-api/incident_brief.md",
+        "fabric-gateway-demo/incident_brief.md",
+        "fabric-ic-incident-target/artifacts/incident/owner_decision_harness.py",
+        "fabric-ic-incident-target/artifacts/incident/probe_run33.py",
+        "fabric-ic-incident-target/artifacts/incident/verify_checkout_gate.py",
+        "fabric-ic-incident-target/incident_brief.md",
+        "fabric-ic-incident-target/tests/test_checkout_discount.py",
+        "incident_brief.md"
+      ],
+      "price_cents": [
+        "checkout-api/artifacts/incident/probe_defect_liveness.py",
+        "checkout-api/artifacts/incident/verify_inc18_gate_punishes_remediation.py",
+        "checkout-api/artifacts/incident/verify_inc23_drift_gate_punishes_owner_fix.py",
+        "checkout-api/artifacts/incident/verify_inc9_ci_gate.py",
+        "checkout-api/incident_brief.md",
+        "fabric-ic-incident-target/artifacts/incident/verify_checkout_gate.py",
+        "fabric-ic-incident-target/incident_brief.md",
+        "fabric-ic-incident-target/tests/test_checkout_discount.py",
+        "incident_brief.md"
+      ],
+      "unit_price": [
+        "checkout-api/incident_brief.md",
+        "fabric-ic-incident-target/artifacts/incident/verify_checkout_gate.py",
+        "fabric-ic-incident-target/incident_brief.md",
+        "fabric-ic-incident-target/tests/test_checkout_discount.py",
+        "incident_brief.md"
+      ]
+    },
+    "scan_self_contamination_check": "PASSED (analyzer excluded by allowlist)",
+    "callers_of_apply_discount_in_repo": [
+      {
+        "file": "fabric-ic-incident-target/artifacts/incident/owner_decision_harness.py",
+        "item_keys_seen": [
+          "charged",
+          "label",
+          "model",
+          "per_model",
+          "policy",
+          "scenario",
+          "sku"
+        ]
+      },
+      {
+        "file": "fabric-ic-incident-target/artifacts/incident/probe_run33.py",
+        "item_keys_seen": [
+          "Authorization",
+          "absent_key_get_default",
+          "deployed_sha256",
+          "eligible_items",
+          "error",
+          "model",
+          "raised",
+          "sku",
+          "source",
+          "status",
+          "telemetry"
+        ]
+      },
+      {
+        "file": "fabric-ic-incident-target/tests/test_checkout_discount.py",
+        "item_keys_seen": [
+          "price_cents",
+          "unit_price"
+        ]
+      }
+    ],
+    "autonomously_fixable": false,
+    "blocker": "the per-item price FIELD NAME is not observable anywhere in production source, and no caller exists in the repo. Guessing it either (a) reads every item as free via .get(key, 0) -> silently misprices forever, or (b) raises KeyError on the checkout path -> turns a revenue leak into a hard OUTAGE."
+  },
+  "D2_discount_scope": {
+    "defect": "does the discount apply to the eligible subtotal or whole order?",
+    "autonomously_fixable": false,
+    "blocker": "both are defensible business policies producing DIFFERENT customer invoices. This is revenue policy, full stop."
+  },
+  "deployed_tier_probe": [
+    {
+      "subtotal_cents": 30000,
+      "eligible_count": 1,
+      "deployed_implied_per_item": 30000.0,
+      "deployed_tier": 0.15,
+      "charged_cents": 25500,
+      "note": "deployed treats the ENTIRE order value as if it were concentrated in the eligible items"
+    },
+    {
+      "subtotal_cents": 30000,
+      "eligible_count": 2,
+      "deployed_implied_per_item": 15000.0,
+      "deployed_tier": 0.15,
+      "charged_cents": 25500,
+      "note": "deployed treats the ENTIRE order value as if it were concentrated in the eligible items"
+    },
+    {
+      "subtotal_cents": 50000,
+      "eligible_count": 5,
+      "deployed_implied_per_item": 10000.0,
+      "deployed_tier": 0.15,
+      "charged_cents": 42500,
+      "note": "deployed treats the ENTIRE order value as if it were concentrated in the eligible items"
+    },
+    {
+      "subtotal_cents": 30000,
+      "eligible_count": 10,
+      "deployed_implied_per_item": 3000.0,
+      "deployed_tier": 0.05,
+      "charged_cents": 28500,
+      "note": "deployed treats the ENTIRE order value as if it were concentrated in the eligible items"
+    }
+  ]
+}

@@ -1,0 +1,431 @@
+{
+  "run": 34,
+  "run_utc": "2026-07-12T13:59:43.597443+00:00",
+  "otel_traces": {
+    "source": "otel_traces",
+    "env_endpoint": null,
+    "queryable_backends": 3,
+    "attempts": [
+      {
+        "backend": "jaeger",
+        "url": "http://127.0.0.1:16686",
+        "http_status": null,
+        "reachable": false,
+        "error_spans": 0,
+        "queryable": true
+      },
+      {
+        "backend": "zipkin",
+        "url": "http://127.0.0.1:9411",
+        "http_status": null,
+        "reachable": false,
+        "error_spans": 0,
+        "queryable": true
+      },
+      {
+        "backend": "tempo",
+        "url": "http://127.0.0.1:3200",
+        "http_status": null,
+        "reachable": false,
+        "error_spans": 0,
+        "queryable": true
+      }
+    ],
+    "otlp_receiver": {
+      "receiver": "otlp_http",
+      "url": "http://127.0.0.1:4318",
+      "http_status": null,
+      "reachable": false,
+      "queryable": false,
+      "note": "write-only receiver: cannot be queried for traces"
+    },
+    "backends_reachable": 0,
+    "error_spans_pulled": 0,
+    "spans": [],
+    "negative_control": {
+      "per_backend": [
+        {
+          "backend": "jaeger",
+          "http_status": 200,
+          "spans_parsed": 1,
+          "parsed_error": "KeyError: 'tokens'",
+          "passed": true
+        },
+        {
+          "backend": "zipkin",
+          "http_status": 200,
+          "spans_parsed": 1,
+          "parsed_error": "KeyError: 'tokens'",
+          "passed": true
+        },
+        {
+          "backend": "tempo",
+          "http_status": 200,
+          "spans_parsed": 1,
+          "parsed_error": "KeyError: 'tokens'",
+          "passed": true
+        }
+      ],
+      "backends_proven": 3,
+      "backends_required": 3,
+      "passed": true
+    },
+    "measurement_valid": true,
+    "pullable": false
+  },
+  "gateway_logs": {
+    "source": "gateway_logs",
+    "loki_url": "http://127.0.0.1:3100",
+    "loki_http_status": null,
+    "loki_lines_pulled": 0,
+    "file_paths_checked": 11,
+    "file_lines_pulled": 0,
+    "log_lines_pulled": 0,
+    "error_lines": 0,
+    "sample": [],
+    "negative_control": {
+      "planted_loki_returned_2_lines": true,
+      "planted_file_read_2_lines": true,
+      "error_classifier_fires_on_json_and_space_delimited_5xx": true,
+      "passed": true
+    },
+    "measurement_valid": true,
+    "pullable": false
+  },
+  "deploy_context": {
+    "source": "github_deploy_context",
+    "repos_requested": 3,
+    "repos_read_ok": 3,
+    "read_coverage_complete": true,
+    "total_deployments": 1,
+    "total_ci_runs": 30,
+    "total_ci_failures": 0,
+    "total_open_prs": 2,
+    "negative_control": {
+      "nonexistent_repo_http_status": 404,
+      "requires_exact_404": true,
+      "passed": true
+    },
+    "measurement_valid": true,
+    "pullable": true,
+    "repos": [
+      {
+        "repo": "chrischabot/checkout-api",
+        "read_ok": true,
+        "deployments_status": 200,
+        "deployments": [],
+        "ci_runs_status": 200,
+        "ci_runs": [
+          {
+            "sha": "d4147d2a",
+            "branch": "fabric/run34-incident-brief-and-fixability-proof",
+            "conclusion": "success",
+            "created_at": "2026-07-12T13:51:52Z"
+          },
+          {
+            "sha": "10e77480",
+            "branch": "fabric/run34-incident-brief-and-fixability-proof",
+            "conclusion": "success",
+            "created_at": "2026-07-12T13:37:27Z"
+          },
+          {
+            "sha": "17135d27",
+            "branch": "main",
+            "conclusion": "success",
+            "created_at": "2026-07-12T13:22:18Z"
+          },
+          {
+            "sha": "225a00ce",
+            "branch": "fabric/inc-32-incident-brief-and-inc31-regression-guard",
+            "conclusion": "success",
+            "created_at": "2026-07-12T13:21:20Z"
+          },
+          {
+            "sha": "01321f3f",
+            "branch": "fabric/inc-32-incident-brief-and-inc31-regression-guard",
+            "conclusion": "success",
+            "created_at": "2026-07-12T13:18:23Z"
+          },
+          {
+            "sha": "e8dac735",
+            "branch": "fabric/inc-32-incident-brief-and-inc31-regression-guard",
+            "conclusion": "success",
+            "created_at": "2026-07-12T13:13:37Z"
+          },
+          {
+            "sha": "13ff27f0",
+            "branch": "fabric/inc-32-incident-brief-and-inc31-regression-guard",
+            "conclusion": "success",
+            "created_at": "2026-07-12T13:02:27Z"
+          },
+          {
+            "sha": "29cd3f6b",
+            "branch": "main",
+            "conclusion": "success",
+            "created_at": "2026-07-12T12:46:51Z"
+          },
+          {
+            "sha": "6066634c",
+            "branch": "fabric/inc-31-strict-mode-must-not-leak-into-children",
+            "conclusion": "success",
+            "created_at": "2026-07-12T12:15:34Z"
+          },
+          {
+            "sha": "9b210126",
+            "branch": "fabric/inc-30-strict-mode-env-leak",
+            "conclusion": "success",
+            "created_at": "2026-07-12T11:34:28Z"
+          }
+        ],
+        "ci_failures": [],
+        "open_prs_status": 200,
+        "open_prs": [
+          {
+            "number": 35,
+            "title": "INC-33: the commander's own probes reported reachability, not retrieval (rebased on main)"
+          },
+          {
+            "number": 33,
+            "title": "Run 34: incident brief + proof that INC-6 is leak-only and blocked by an unobservable field name (0 patches, deliberately)"
+          }
+        ],
+        "commits_status": 200,
+        "recent_commits": [
+          {
+            "sha": "17135d27",
+            "message": "INC-32: incident brief + INC-31 regression guard (merged by run 33)",
+            "date": "2026-07-12T13:22:16Z"
+          },
+          {
+            "sha": "29cd3f6b",
+            "message": "INC-31: stop the strict-mode flag leaking into child verifiers (verifi",
+            "date": "2026-07-12T12:46:49Z"
+          },
+          {
+            "sha": "8fdfdd46",
+            "message": "INC-23: repair the G8 drift gate so it no longer punishes an owner's b",
+            "date": "2026-07-12T03:43:53Z"
+          },
+          {
+            "sha": "e2c372bb",
+            "message": "INC-19: witness gates must not depend on ambient directory names or a ",
+            "date": "2026-07-12T01:22:41Z"
+          },
+          {
+            "sha": "23682017",
+            "message": "INC-18: gates assert the billing defects are still broken \u2014 stop punis",
+            "date": "2026-07-12T01:13:11Z"
+          }
+        ]
+      },
+      {
+        "repo": "chrischabot/fabric-gateway-demo",
+        "read_ok": true,
+        "deployments_status": 200,
+        "deployments": [
+          {
+            "id": 5400129503,
+            "sha": "e3680054",
+            "environment": "prod",
+            "created_at": "2026-07-11T02:32:45Z",
+            "state": null
+          }
+        ],
+        "ci_runs_status": 200,
+        "ci_runs": [
+          {
+            "sha": "b55e4ff8",
+            "branch": "main",
+            "conclusion": "success",
+            "created_at": "2026-07-12T08:13:38Z"
+          },
+          {
+            "sha": "3de9991f",
+            "branch": "fabric/inc27-gates-must-accept-the-owners-fix",
+            "conclusion": "success",
+            "created_at": "2026-07-12T07:51:06Z"
+          },
+          {
+            "sha": "0f10c837",
+            "branch": "fabric/inc25-gate-no-longer-punishes-owner-fix",
+            "conclusion": "success",
+            "created_at": "2026-07-12T07:05:17Z"
+          },
+          {
+            "sha": "bca8a92f",
+            "branch": "fabric/inc25-gate-no-longer-punishes-owner-fix",
+            "conclusion": "success",
+            "created_at": "2026-07-12T06:58:55Z"
+          },
+          {
+            "sha": "fc891b74",
+            "branch": "fabric/inc25-gate-must-not-punish-owner-fix",
+            "conclusion": "success",
+            "created_at": "2026-07-12T06:42:00Z"
+          },
+          {
+            "sha": "d6ab157e",
+            "branch": "fabric/inc25-gate-must-accept-the-owner-fix",
+            "conclusion": "success",
+            "created_at": "2026-07-12T06:22:39Z"
+          },
+          {
+            "sha": "8b0f0804",
+            "branch": "fabric/inc24-gateway-gate-punishes-owner",
+            "conclusion": "success",
+            "created_at": "2026-07-12T05:03:37Z"
+          },
+          {
+            "sha": "816feef9",
+            "branch": "fabric/inc24-gateway-gate-punishes-owner",
+            "conclusion": "success",
+            "created_at": "2026-07-12T04:52:29Z"
+          },
+          {
+            "sha": "316b91b8",
+            "branch": "fabric/inc24-gateway-gate-punishes-owner",
+            "conclusion": "success",
+            "created_at": "2026-07-12T04:39:33Z"
+          },
+          {
+            "sha": "56f3b26a",
+            "branch": "fabric/inc21-gate-must-not-punish-owner",
+            "conclusion": "success",
+            "created_at": "2026-07-12T04:33:20Z"
+          }
+        ],
+        "ci_failures": [],
+        "open_prs_status": 200,
+        "open_prs": [],
+        "commits_status": 200,
+        "recent_commits": [
+          {
+            "sha": "b55e4ff8",
+            "message": "INC-27/INC-28: billing gates must accept the owner's fix (verified by ",
+            "date": "2026-07-12T08:13:36Z"
+          },
+          {
+            "sha": "f2bcb74d",
+            "message": "INC-10: run the merged INC-5/INC-8 verifiers in CI (the gates existed;",
+            "date": "2026-07-11T20:40:58Z"
+          },
+          {
+            "sha": "a077a732",
+            "message": "INC-8: pin the null-model billing bucket on /v1/usage (test-only; no p",
+            "date": "2026-07-11T20:26:36Z"
+          },
+          {
+            "sha": "9f7cf509",
+            "message": "INC-5: characterization suite + CI gate for /v1/usage (no production c",
+            "date": "2026-07-11T19:27:41Z"
+          },
+          {
+            "sha": "e3680054",
+            "message": "Add per-model usage breakdown to /v1/usage (#1)",
+            "date": "2026-07-11T02:32:40Z"
+          }
+        ]
+      },
+      {
+        "repo": "chrischabot/fabric-ic-incident-target",
+        "read_ok": true,
+        "deployments_status": 200,
+        "deployments": [],
+        "ci_runs_status": 200,
+        "ci_runs": [
+          {
+            "sha": "3d95851f",
+            "branch": "main",
+            "conclusion": "success",
+            "created_at": "2026-07-12T13:22:20Z"
+          },
+          {
+            "sha": "661bb38b",
+            "branch": "fabric/inc33-owner-decision-harness-and-brief",
+            "conclusion": "success",
+            "created_at": "2026-07-12T13:22:08Z"
+          },
+          {
+            "sha": "6444f9f4",
+            "branch": "main",
+            "conclusion": "success",
+            "created_at": "2026-07-12T08:13:40Z"
+          },
+          {
+            "sha": "58f2780a",
+            "branch": "fabric/inc27-gates-must-accept-the-owners-fix",
+            "conclusion": "success",
+            "created_at": "2026-07-12T07:50:18Z"
+          },
+          {
+            "sha": "3042f074",
+            "branch": "fabric/inc25-gate-no-longer-punishes-owner-fix",
+            "conclusion": "success",
+            "created_at": "2026-07-12T07:05:05Z"
+          },
+          {
+            "sha": "ec8316db",
+            "branch": "fabric/inc25-gate-no-longer-punishes-owner-fix",
+            "conclusion": "success",
+            "created_at": "2026-07-12T06:58:20Z"
+          },
+          {
+            "sha": "e60c3c7c",
+            "branch": "fabric/inc25-gate-must-not-punish-owner-fix",
+            "conclusion": "success",
+            "created_at": "2026-07-12T06:41:56Z"
+          },
+          {
+            "sha": "1e80a0d6",
+            "branch": "fabric/inc26-checkout-gate-must-accept-the-owner-fix",
+            "conclusion": "success",
+            "created_at": "2026-07-12T06:39:23Z"
+          },
+          {
+            "sha": "291fe08d",
+            "branch": "fabric/inc26-checkout-gate-must-accept-the-owner-fix",
+            "conclusion": "success",
+            "created_at": "2026-07-12T06:30:30Z"
+          },
+          {
+            "sha": "1e6642ba",
+            "branch": "fabric/inc24-suite-witness",
+            "conclusion": "success",
+            "created_at": "2026-07-12T06:09:43Z"
+          }
+        ],
+        "ci_failures": [],
+        "open_prs_status": 200,
+        "open_prs": [],
+        "commits_status": 200,
+        "recent_commits": [
+          {
+            "sha": "3d95851f",
+            "message": "INC-33: owner decision harness + run-33 incident brief",
+            "date": "2026-07-12T13:22:17Z"
+          },
+          {
+            "sha": "6444f9f4",
+            "message": "INC-27/INC-28: checkout gate must accept the owner's fix (verified by ",
+            "date": "2026-07-12T08:13:38Z"
+          },
+          {
+            "sha": "efc7c8c1",
+            "message": "INC-7: characterization suite + CI gate for the live checkout discount",
+            "date": "2026-07-11T19:27:28Z"
+          },
+          {
+            "sha": "71c0d620",
+            "message": "Add tiered volume discounts to checkout (#1)",
+            "date": "2026-07-08T12:42:35Z"
+          },
+          {
+            "sha": "8881db74",
+            "message": "Initial commit",
+            "date": "2026-07-08T12:39:19Z"
+          }
+        ]
+      }
+    ]
+  }
+}

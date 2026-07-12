@@ -1,0 +1,98 @@
+{
+  "run": 34,
+  "run_utc": "2026-07-12T13:34:10.000002+00:00",
+  "telemetry": {
+    "sources_pullable": "0 of 3",
+    "total_production_symptoms_pulled": 0,
+    "negative_controls_all_passed": true,
+    "blast_radius_estimable": false,
+    "sentry": {
+      "source": "sentry",
+      "env_vars_present": [],
+      "negative_control": {
+        "stub_401_without_token": true,
+        "stub_pulled_1_issue_with_token": true,
+        "stub_parsed_event_count": 7,
+        "passed": true
+      },
+      "measurement_valid": true,
+      "egress_status": 200,
+      "egress_ok": true,
+      "auth_status": 401,
+      "issues_pulled": 0,
+      "issues": [],
+      "pullable": false,
+      "diagnosis": "CREDENTIAL MISSING (egress works, server answered 401)"
+    },
+    "otel": {
+      "source": "otel",
+      "env_vars_present": [],
+      "ports_probed": 11,
+      "ports_open": [],
+      "negative_control_detected_own_port": true,
+      "pullable": false,
+      "traces_pulled": 0,
+      "measurement_valid": true
+    },
+    "gateway_logs": {
+      "source": "gateway_logs",
+      "paths_checked": 11,
+      "sources_found": 0,
+      "log_lines_pulled": 0,
+      "negative_control_read_planted_file": true,
+      "pullable": false,
+      "measurement_valid": true
+    }
+  },
+  "defects_live_by_execution": [
+    {
+      "incident": "INC-6",
+      "repo": "fabric-ic-incident-target",
+      "file": "checkout.py",
+      "reads_any_item_field": false,
+      "charge_1c_item": 25500,
+      "charge_29999c_item": 25500,
+      "price_blind": true,
+      "charge_300usd_order_one_10usd_item": 25500,
+      "leak_cents": 4500,
+      "leak_by_eligible_count": {
+        "1": 25500,
+        "5": 27000,
+        "20": 30000
+      },
+      "all_eligible_5x100": 42500,
+      "declared_policy": null,
+      "live": true
+    },
+    {
+      "incident": "INC-5",
+      "repo": "fabric-gateway-demo",
+      "file": "service/usage_aggregator.py",
+      "valid_billable_tokens_in_batch": 140,
+      "raised": "KeyError(\"'tokens'\")",
+      "whole_batch_destroyed": true,
+      "valid_tokens_lost": 140,
+      "live": true
+    },
+    {
+      "incident": "INC-8",
+      "repo": "fabric-gateway-demo",
+      "file": "service/usage_aggregator.py",
+      "raised": null,
+      "per_model": {
+        "'gpt-4'": 100,
+        "None": 40
+      },
+      "grand_total": 140,
+      "none_bucket_present": true,
+      "grand_total_reconciles": true,
+      "json_serializes_none_key_as": "{\"gpt-4\": 100, \"null\": 40}",
+      "live": true
+    }
+  ],
+  "inc5_inc8_are_one_decision": {
+    "expression": "{\"model\": None}.get(\"model\", \"unknown\")",
+    "result": "None",
+    "implication": "a repair guarding only ABSENT keys passes a NULL straight through -- fixing INC-5 that way leaves INC-8 LIVE. They are ONE decision."
+  }
+}
