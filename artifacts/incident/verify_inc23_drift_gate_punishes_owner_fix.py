@@ -61,6 +61,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import shutil
@@ -89,6 +90,28 @@ REPAIR_LINE = '    avg_cents = sum(i["price_cents"] for i in eligible_items) / n
 RESULTS: list[tuple[str, bool, str]] = []
 SKIPPED: list[tuple[str, str]] = []
 
+# INC-31 -- STOP THE STRICT-MODE FLAG LEAKING INTO CHILDREN.
+#
+# `subprocess.run()` without `env=` hands the child the parent's ENTIRE
+# environment, and strict cross-fleet mode is honoured through an environment
+# variable. Children spawned here run against synthetic bare trees as NEGATIVE
+# CONTROLS that require the child to SKIP and exit 0. A control child that
+# INHERITS the strict flag is forced into strict mode and hard-fails for want of
+# siblings that are legitimately absent -- so the control proves nothing.
+#
+# THE RULE: an intent must be PASSED to the child that should receive it,
+# never INHERITED by a child that must not.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    """A child environment with the strict flag ALWAYS scrubbed."""
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
 
 def gate(name: str, ok: bool, detail: str = "") -> None:
     RESULTS.append((name, ok, detail))
@@ -108,6 +131,7 @@ def run(script: pathlib.Path, cwd: pathlib.Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(script)], cwd=str(cwd),
         capture_output=True, text=True, timeout=900,
+        env=child_env(),
     )
 
 
@@ -426,6 +450,7 @@ def main() -> int:
         pr = subprocess.run(
             [sys.executable, str(probe), str(repaired_checkout)],
             capture_output=True, text=True, timeout=120,
+            env=child_env(),
         )
         vals = pr.stdout.split()
         correct = vals == ["30000", "42500", "30000"]
