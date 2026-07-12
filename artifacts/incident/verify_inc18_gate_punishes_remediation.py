@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import subprocess
@@ -331,6 +332,25 @@ def write_pair(directory, checkout_src, agg_src, tag):
     return load(c, "co_" + tag), load(a, "ag_" + tag)
 
 
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    """Environment for a CHILD verifier: the strict flag is never INHERITED.
+
+    G1 spawns verify_inc9_ci_gate.py, which honours FABRIC_REQUIRE_CROSS_FLEET.
+    In a bare checkout -- precisely what this repo's CI clones -- INC-9 has no
+    siblings, so it correctly SKIPs its cross-fleet gates and exits 0. An
+    inherited strict flag would force it into strict mode and hard-fail it for
+    that legitimate absence.
+    """
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
+
 def main():
     print("Fabric incident commander -- INC-18 verification gates")
     print("(the cross-fleet gates asserted the billing defects were STILL BROKEN)\n")
@@ -343,6 +363,7 @@ def main():
         capture_output=True,
         text=True,
         timeout=600,
+        env=child_env(),
     )
     blob = shipped.stdout + shipped.stderr
     ran_cross_fleet = "G6a" in blob

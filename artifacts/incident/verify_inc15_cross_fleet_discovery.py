@@ -150,6 +150,36 @@ def skip(name: str, detail: str = "") -> None:
     print(f"[SKIP] {name}" + (f"\n         {detail}" if detail else ""))
 
 
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    """The environment handed to a CHILD verifier.
+
+    subprocess.run() without env= gives the child the parent's ENTIRE
+    environment. Strict cross-fleet mode is honoured through an environment
+    variable, so the instant an operator or a CI job exports it, a child spawned
+    as a NEGATIVE CONTROL -- one that runs against a synthetic bare checkout and
+    must report SKIP -- INHERITS the flag, is forced into strict mode, and
+    hard-fails for want of siblings that are legitimately absent.
+
+    A negative control that inherits the very flag it is controlling for is not
+    a control. So the variable is ALWAYS scrubbed, and re-set only when this
+    process explicitly wants the child to run strict.
+
+    An intent must be PASSED to the child that should receive it, never
+    INHERITED by a child that must not.
+
+    Note this does NOT remove strict mode: the top-level flag still works, via
+    argv and via the environment, and still hard-fails when legitimately asked.
+    """
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)  # ALWAYS scrubbed
+    if strict:
+        env[STRICT_ENV_VAR] = "1"  # ...re-set ONLY on explicit request
+    return env
+
+
 def run_verifier(cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "artifacts/incident/verify_inc9_ci_gate.py", *args],
@@ -157,6 +187,7 @@ def run_verifier(cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         timeout=600,
+        env=child_env(),
     )
 
 

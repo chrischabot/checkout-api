@@ -57,6 +57,7 @@ Exit 0 = every gate passed.
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import re
 import shutil
@@ -97,6 +98,27 @@ def sha(path: pathlib.Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    """Environment for a CHILD verifier: the strict flag is never INHERITED.
+
+    G1 and the nested-CI simulation below both spawn verify_inc9_ci_gate.py --
+    which HONOURS FABRIC_REQUIRE_CROSS_FLEET -- and they do so against trees
+    (including a bare checkout, exactly what this repo's CI clones) where the
+    sibling repos are legitimately absent. An inherited strict flag forces the
+    child into strict mode and hard-fails it for that absence, so the gate would
+    report "INC-9 does not pass" -- which is false, and unrelated to the property
+    the gate tests.
+    """
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
+
 def npm_test(cwd: pathlib.Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["npm", "test", "--silent"],
@@ -104,6 +126,7 @@ def npm_test(cwd: pathlib.Path) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         timeout=300,
+        env=child_env(),
     )
 
 
@@ -170,6 +193,7 @@ def main() -> int:
         capture_output=True,
         text=True,
         timeout=600,
+        env=child_env(),
     )
     gate(
         "G1 the merged INC-9 mutation-witness verifier passes on the current tree",
@@ -254,6 +278,7 @@ def main() -> int:
             capture_output=True,
             text=True,
             timeout=600,
+            env=child_env(),
         )
         vblob = new_ci_verifier.stdout + new_ci_verifier.stderr
 

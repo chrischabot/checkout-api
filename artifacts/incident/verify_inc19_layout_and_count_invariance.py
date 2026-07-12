@@ -63,6 +63,7 @@ Exit: 0 = every executed gate passed.
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import re
 import shutil
@@ -132,9 +133,33 @@ def siblings_here():
     return None, None
 
 
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    """Environment for a CHILD verifier: the strict flag is never INHERITED.
+
+    See verify_inc15_cross_fleet_discovery.child_env for the full reasoning.
+    Several gates below spawn verifiers against synthetic BARE-CHECKOUT trees
+    whose siblings are deliberately absent; if such a child inherits an exported
+    FABRIC_REQUIRE_CROSS_FLEET it is forced into strict mode and hard-fails on a
+    tree that is behaving exactly as the gate requires.
+    """
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
+
 def run(cwd: pathlib.Path, rel: str, *args: str):
     p = subprocess.run(
-        [sys.executable, rel, *args], cwd=str(cwd), capture_output=True, text=True, timeout=900
+        [sys.executable, rel, *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=900,
+        env=child_env(),
     )
     return p.returncode, p.stdout + p.stderr
 

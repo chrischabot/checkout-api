@@ -61,6 +61,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import shutil
@@ -104,10 +105,26 @@ def sha(p: pathlib.Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    """Environment for a CHILD verifier: the strict flag is never INHERITED.
+
+    See verify_inc15_cross_fleet_discovery.child_env for the full reasoning.
+    """
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
+
 def run(script: pathlib.Path, cwd: pathlib.Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(script)], cwd=str(cwd),
         capture_output=True, text=True, timeout=900,
+        env=child_env(),
     )
 
 

@@ -200,3 +200,35 @@ jobs:
       # gate green, and it FAILS the INC-23 G5 witness. Correction, not cover-up.
       - name: Run the INC-23 gate (the drift gate must not punish an owner's billing repair)
         run: python3 artifacts/incident/verify_inc23_drift_gate_punishes_owner_fix.py
+
+      # ---------------------------------------------------------------- INC-30 --
+      # A strict-mode flag LEAKED into child verifiers through the environment.
+      #
+      # Not one subprocess.run in this repo passed env=, so every child inherited
+      # the parent's entire environment -- including FABRIC_REQUIRE_CROSS_FLEET.
+      # Several of those children are NEGATIVE CONTROLS run against a synthetic bare
+      # checkout, where the siblings are deliberately absent and the gate requires a
+      # SKIP. Export the flag and the control child inherits it, is forced into
+      # strict mode, and hard-fails for want of siblings it was never meant to have.
+      #
+      #   A negative control that inherits the very flag it is controlling for
+      #   is not a control.
+      #
+      # Measured on main, SAME TREE, same intent delivered two ways:
+      #   verify_inc15 / verify_inc19 / verify_inc23
+      #     --require-cross-fleet (argv) -> exit 0 GREEN
+      #     FABRIC_REQUIRE_CROSS_FLEET=1 -> exit 1 RED
+      #
+      #   A verdict that depends on HOW strict mode was requested is not a verdict.
+      #
+      # The repair: child_env() ALWAYS pops the variable and re-sets it only on
+      # explicit request. Strict mode is untouched at the top level -- this stops it
+      # LEAKING, it does not remove it (gate G4 proves exactly that, which is what
+      # makes this a correction and not a cover-up).
+      #
+      # This step is GREEN on a bare checkout -- G0 (static/AST) and G6 (no drift)
+      # execute everywhere and need no siblings, while the behavioural witnesses
+      # report SKIPPED -- so it cannot become the INC-11 permanently-red bug. And
+      # stripping the repair still reddens it: verified by execution, G0 -> 5/6, exit 1.
+      - name: Run the INC-30 gate (an intent must be PASSED to a child, never INHERITED)
+        run: python3 artifacts/incident/verify_inc30_strict_mode_env_leak.py
