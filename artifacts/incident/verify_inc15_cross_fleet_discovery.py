@@ -150,13 +150,57 @@ def skip(name: str, detail: str = "") -> None:
     print(f"[SKIP] {name}" + (f"\n         {detail}" if detail else ""))
 
 
-def run_verifier(cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
+# ---------------------------------------------------------------------------
+# INC-28 REPAIR -- an intent must be PASSED to the child that should receive it,
+# never INHERITED by a child that must not.
+#
+# `_strict_cross_fleet()` (in verify_inc9_ci_gate.py) and the `strict` check in
+# main() below both honour the FABRIC_REQUIRE_CROSS_FLEET environment variable.
+# That is a legitimate input for a TOP-LEVEL invocation. But several of the
+# children spawned below exist specifically as NEGATIVE CONTROLS: they run a
+# verifier against a synthetic BARE CHECKOUT (siblings deliberately absent) and
+# require it to report SKIP and exit 0.
+#
+# subprocess.run() without env= hands the child the parent's WHOLE environment.
+# So when an operator or CI job exports FABRIC_REQUIRE_CROSS_FLEET=1, the
+# negative-control child inherits it, is forced into strict mode, and HARD-FAILS
+# where the control demands a SKIP. The control then reports a failure that has
+# nothing whatsoever to do with the property it is testing.
+#
+# Measured on the healthy fleet before this repair:
+#     argv flag only  -> INC-15 9/9, INC-19 7/7, INC-23 8/8   (exit 0)
+#     env var set     -> INC-15 8/9, INC-19 2/7, INC-23 5/8   (exit 1)
+# An ambient variable made a HEALTHY fleet report RED.
+#
+# A negative control that inherits the very flag it is controlling for is not a
+# control. So the strict intent is ALWAYS scrubbed from the child environment and
+# set back ONLY when a call site explicitly asks for it.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool | None = None) -> dict:
+    """Environment for a spawned child verifier, with the strict intent explicit.
+
+    The strict-cross-fleet flag is removed from the inherited environment and
+    re-set only when `strict=True` is passed. Default (None/False) => scrubbed.
+    """
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
+
+def run_verifier(
+    cwd: pathlib.Path, *args: str, strict: bool | None = None
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "artifacts/incident/verify_inc9_ci_gate.py", *args],
         cwd=str(cwd),
         capture_output=True,
         text=True,
         timeout=600,
+        env=child_env(strict=strict),
     )
 
 

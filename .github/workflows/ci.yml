@@ -200,3 +200,48 @@ jobs:
       # gate green, and it FAILS the INC-23 G5 witness. Correction, not cover-up.
       - name: Run the INC-23 gate (the drift gate must not punish an owner's billing repair)
         run: python3 artifacts/incident/verify_inc23_drift_gate_punishes_owner_fix.py
+
+      # INC-28 (Fabric autonomous incident commander).
+      #
+      # THE STRICT-MODE FLAG LEAKED INTO THE NEGATIVE CONTROLS.
+      #
+      # verify_inc15 / verify_inc19 / verify_inc23 each SPAWN CHILD verifiers, and
+      # several of those children exist specifically as NEGATIVE CONTROLS: they run
+      # against a synthetic BARE CHECKOUT (siblings deliberately absent) and require
+      # the child to report SKIP and exit 0. That is how they prove these steps are
+      # not permanently red in THIS job, which clones only this repo.
+      #
+      # But subprocess.run() WITHOUT env= hands the child the parent's ENTIRE
+      # environment -- and strict cross-fleet mode is honoured via an env var,
+      # FABRIC_REQUIRE_CROSS_FLEET. So the moment an operator or a CI job exports it,
+      # the control child INHERITS it, is forced into strict mode, and HARD-FAILS
+      # exactly where the control demands a SKIP. The gate then reports a failure
+      # that has nothing to do with the property it is testing.
+      #
+      # Measured on a fleet that was otherwise 13/13 GREEN:
+      #
+      #   --require-cross-fleet (argv)   -> INC-15 9/9 · INC-19 7/7 · INC-23 8/8  OK
+      #   FABRIC_REQUIRE_CROSS_FLEET=1   -> INC-15 8/9 · INC-19 2/7 · INC-23 5/8  RED
+      #
+      # An AMBIENT VARIABLE made a HEALTHY fleet report RED, in three verifiers at
+      # once. A NEGATIVE CONTROL THAT INHERITS THE VERY FLAG IT IS CONTROLLING FOR
+      # IS NOT A CONTROL.
+      #
+      # THE REPAIR: an intent must be PASSED to the child that should receive it,
+      # never INHERITED by a child that must not. Each verifier now scrubs the flag
+      # from the child environment (child_env) and re-sets it only when a call site
+      # explicitly asks. The strict-mode FEATURE is untouched -- this stops it
+      # LEAKING, it does not remove it.
+      #
+      # ANTI-WEAKENING is gated: deleting strict mode outright would ALSO have turned
+      # the three verifiers green, and it FAILS INC-28's G5a (strict mode must still
+      # hard-fail when legitimately requested via argv). G5b additionally proves the
+      # AST audit REJECTS a tree where the scrub has been reverted. Correction, not
+      # cover-up.
+      #
+      # SAFETY: no production source is touched (G6 asserts byte-identity). G0/G1/G2/
+      # G3/G5 all execute on a BARE CHECKOUT -- this step is green here (the G4
+      # end-to-end gate reports SKIPPED without the siblings, never a pass and never
+      # a hard failure) -- so it cannot become the permanently-red INC-11 bug.
+      - name: Run the INC-28 gate (a strict-mode flag must not leak into a negative control)
+        run: python3 artifacts/incident/verify_inc28_strict_mode_env_leak.py
