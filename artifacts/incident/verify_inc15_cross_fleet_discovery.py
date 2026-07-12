@@ -99,6 +99,37 @@ BASELINES = {
 RESULTS: list[tuple[str, bool, str]] = []
 SKIPPED: list[tuple[str, str]] = []
 
+# INC-31 -- STOP THE STRICT-MODE FLAG LEAKING INTO CHILDREN.
+#
+# Strict cross-fleet mode is honoured through an environment variable (see the
+# `strict` computation in main()). But `subprocess.run()` WITHOUT `env=` hands
+# the child the parent's ENTIRE environment, so the flag leaks into children
+# that must NOT receive it.
+#
+# Several children here are spawned as NEGATIVE CONTROLS: they run against a
+# synthetic BARE CHECKOUT (siblings deliberately absent) and the gate REQUIRES
+# the child to report SKIP and exit 0. A control child that INHERITS the flag is
+# forced into strict mode and HARD-FAILS for want of siblings that are
+# legitimately absent -- so the control tests nothing.
+#
+# A negative control that inherits the very flag it is controlling for is not a
+# control. THE RULE: an intent must be PASSED to the child that should receive
+# it, never INHERITED by a child that must not.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    """A child environment with the strict flag ALWAYS scrubbed.
+
+    Re-set it ONLY when the caller explicitly asks. The strict-mode feature is
+    untouched at the top level: this stops it LEAKING, it does not remove it.
+    """
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
 
 def _snapshot_now() -> dict[pathlib.Path, str]:
     """Hash the deployed sources AS THEY ARE RIGHT NOW (verifier start).
@@ -157,6 +188,7 @@ def run_verifier(cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         timeout=600,
+        env=child_env(),
     )
 
 
