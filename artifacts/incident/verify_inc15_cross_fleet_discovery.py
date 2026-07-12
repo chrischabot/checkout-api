@@ -169,6 +169,70 @@ def old_discovery(fleet_roots: list[pathlib.Path]):
     return target, gateway
 
 
+# ---------------------------------------------------------------------------
+# INC-16 -- the witness must be evaluated on a tree that can actually HOST it.
+#
+# G4/G5 used to run the OLD lookup against the AMBIENT fleet roots and assert it
+# found NOTHING. That silently keyed the verifier's exit code off how the sibling
+# clone directories happen to be NAMED: cloned as `gateway/` + `incident-target/`
+# the old lookup DOES resolve them, "the old discovery is blind" is FALSE, and
+# G4/G5 went RED (7/9, exit 1) -- while the identical tree renamed to
+# `fabric-gateway-demo/` + `fabric-ic-incident-target/` printed 9/9, exit 0.
+#
+# That was self-contradictory: G3 of THIS FILE certifies the legacy names as
+# SUPPORTED ("the fix adds, never replaces"), so hard-failing on the layout we
+# just declared supported is the verifier arguing with itself. And a gate whose
+# colour depends on ambient directory naming rather than on the property under
+# test is exactly the "gate rots into decoration" failure mode this fleet keeps
+# re-learning (INC-9/INC-11/INC-12/INC-15).
+#
+# The repair: where the ambient clone uses the REAL repo names, the old lookup is
+# genuinely blind there and we witness on the ambient tree exactly as before.
+# Where it uses the LEGACY names -- where the old lookup legitimately resolves and
+# there is NO blindness to witness -- we build a canonical REAL-name fleet in a
+# temp dir and witness the OLD-vs-NEW divergence THERE. The divergence being
+# proven is a property of the two implementations, not of the clone's dirname.
+# ---------------------------------------------------------------------------
+REAL_TARGET_DIR = "fabric-ic-incident-target"
+REAL_GATEWAY_DIR = "fabric-gateway-demo"
+
+# TemporaryDirectory objects are kept ALIVE for the whole run. If one is garbage
+# collected the directory is removed and the witness paths vanish mid-run, which
+# would falsely redden G5.
+_WITNESS_TMPDIRS: list = []
+
+
+def _witness_roots(roots: list[pathlib.Path], siblings_present: bool):
+    """Roots on which the OLD-vs-NEW divergence can honestly be witnessed.
+
+    Returns (roots_or_None, mode). None means "no witness is possible here" and
+    G4/G5 must SKIP -- a bare CI checkout, where G6 already serves as the
+    negative control.
+    """
+    if not siblings_present:
+        return None, "no sibling fleet on this filesystem"
+
+    o_target, o_gateway = old_discovery(roots)
+    if o_target is None and o_gateway is None:
+        # The ambient fleet uses the REAL repo names: the pre-repair lookup is
+        # genuinely blind on this very filesystem. Witness it right here.
+        return roots, "ambient fleet, real repo names"
+
+    # The ambient fleet uses the LEGACY dir names. The OLD lookup resolves them --
+    # as G3 REQUIRES it keep doing -- so there is no blindness to witness on this
+    # tree. Build a canonical REAL-name fleet and witness the divergence there.
+    tmp = tempfile.TemporaryDirectory()
+    _WITNESS_TMPDIRS.append(tmp)  # keep alive for the rest of the run
+    root = pathlib.Path(tmp.name)
+    (root / REAL_TARGET_DIR).mkdir(parents=True)
+    (root / REAL_TARGET_DIR / "checkout.py").write_text("# canonical-name witness fleet\n")
+    (root / REAL_GATEWAY_DIR / "service").mkdir(parents=True)
+    (root / REAL_GATEWAY_DIR / "service" / "usage_aggregator.py").write_text(
+        "# canonical-name witness fleet\n"
+    )
+    return [root], "synthetic canonical fleet (ambient clone uses the legacy dir names)"
+
+
 def new_discovery(fleet_roots: list[pathlib.Path]):
     """The REPAIRED lookup -- driven through the DEPLOYED verifier's own symbols.
 
@@ -287,16 +351,25 @@ def main() -> int:
         )
 
     # ------------------------------------------- G4 · WITNESS A (blindness) --
-    o_target, o_gateway = old_discovery(roots)
-    if siblings_present:
+    # INC-16: resolve the witness roots ONCE and use them for BOTH G4 and G5. See
+    # _witness_roots: on a fleet cloned under the REAL repo names that is the
+    # ambient tree (unchanged behaviour); on one cloned under the LEGACY names --
+    # which G3 certifies as supported, and where the OLD lookup therefore resolves
+    # correctly -- it is a synthetic canonical fleet, because a tree the old lookup
+    # can SEE cannot host a blindness witness.
+    witness_roots, witness_mode = _witness_roots(roots, siblings_present)
+    if witness_roots is not None:
+        o_target, o_gateway = old_discovery(witness_roots)
+        w_target, w_gateway = new_discovery(witness_roots)
         gate(
             "G4 WITNESS A — the PRE-REPAIR discovery is BLIND on this very filesystem",
             o_target is None and o_gateway is None,
-            f"old logic finds NEITHER sibling despite both being present: "
+            f"[{witness_mode}] old logic finds NEITHER sibling despite both being present: "
             f"incident-target={o_target} gateway={o_gateway}. "
             f"This is why G6a/G6b/G6c never executed, in ANY environment.",
         )
     else:
+        o_target = o_gateway = w_target = w_gateway = None
         skip(
             "G4 WITNESS A — the PRE-REPAIR discovery is BLIND on this very filesystem",
             "needs the siblings present to demonstrate blindness IN SPITE of their "
@@ -308,12 +381,16 @@ def main() -> int:
     # same filesystem. If both behaved alike the repair would be a no-op.
     # Requires the siblings to be present -- there is no divergence to observe on
     # a filesystem where NEITHER implementation could find anything.
-    if siblings_present:
+    # `ran` stays derived from actually invoking the repaired verifier against the
+    # AMBIENT roots -- that is what proves the REAL DEPLOYED discovery works HERE.
+    # Only the OLD-vs-NEW blindness comparison moves onto the witness roots.
+    if witness_roots is not None:
         old_would_skip = o_target is None or o_gateway is None
-        new_would_run = n_target is not None and n_gateway is not None
+        new_would_run = w_target is not None and w_gateway is not None
         gate(
             "G5 WITNESS B — DIVERGENCE: OLD skips all 3 gates · NEW executes all 3",
             old_would_skip and new_would_run and ran == {"G6a", "G6b", "G6c"},
+            f"[{witness_mode}] "
             f"OLD -> skips G6a/G6b/G6c (and printed a confident '6/6 passed') · "
             f"NEW -> executes {sorted(ran)}. Same filesystem, opposite outcomes: "
             f"the repair is NOT a no-op.",

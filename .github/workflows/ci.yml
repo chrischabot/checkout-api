@@ -94,3 +94,58 @@ jobs:
       # That was the INC-11 bug and is deliberately not re-committed.
       - name: Run the INC-15 cross-fleet discovery gate (a skip must never count as a pass)
         run: python3 artifacts/incident/verify_inc15_cross_fleet_discovery.py
+
+      # INC-16 (Fabric autonomous incident commander).
+      #
+      # The INC-15 verifier's own witness gates (G4/G5) compared the OLD and NEW
+      # discovery against the AMBIENT fleet roots. The OLD lookup searches for
+      # dirs literally named `incident-target/` and `gateway/` -- so on a fleet
+      # cloned under exactly those LEGACY names it RESOLVES them, "the old
+      # discovery is blind" is FALSE, and G4/G5 turned RED (7/9, exit 1). The
+      # same tree under the real repo names printed 9/9, exit 0.
+      #
+      # So the verifier's exit code was a function of how someone NAMED their
+      # clone directories -- while G3 of that same file certifies the legacy names
+      # as SUPPORTED. It contradicted itself. A gate whose colour depends on
+      # ambient directory naming rather than on the property under test is the
+      # "gate rots into decoration" failure mode this fleet keeps re-learning.
+      #
+      # This step guards the repair so it cannot rot in turn.
+      #
+      # NOTE on the bare checkout: this gate's whole subject is how discovery
+      # behaves ACROSS LAYOUTS, so it structurally needs the sibling fleet repos,
+      # which CI does not clone. Rather than pass vacuously (INC-15's sin) or go
+      # permanently red (INC-11's sin), the step runs whenever the siblings are
+      # present under EITHER supported layout, and says so plainly when they are
+      # absent entirely.
+      #
+      # The presence check accepts the real repo names AND the legacy ones.
+      # Checking only the real names would skip this verifier on a legacy-name
+      # checkout -- the guard would itself be layout-dependent, which is precisely
+      # the defect the verifier exists to prevent. The verifier does the
+      # authoritative resolution; this guard only avoids invoking it where no
+      # fleet exists at all.
+      - name: Run the INC-16 layout-independence gate (a gate must not depend on dir names)
+        run: |
+          if { [ -f ../fabric-gateway-demo/service/usage_aggregator.py ] \
+               || [ -f ../gateway/service/usage_aggregator.py ]; } \
+             && { [ -f ../fabric-ic-incident-target/checkout.py ] \
+                  || [ -f ../incident-target/checkout.py ]; }; then
+            python3 artifacts/incident/verify_inc16_layout_independent_witness.py
+          else
+            echo "SKIPPED: the sibling fleet repos are not present in this checkout"
+            echo "(checked both the real and the legacy directory names)."
+            echo "This gate witnesses a cross-LAYOUT discovery bug, so it requires them."
+            echo "It is NOT counted as a pass. Run it from the incident-commander workspace."
+          fi
+
+      # The guard ABOVE is itself a piece of layout-dependent logic, so it needs its
+      # own regression net -- otherwise a future edit could quietly narrow it back to
+      # the real names only, silently skipping the layout-independence verifier on a
+      # legacy-name checkout. (That was the first version of this step.)
+      #
+      # This test builds synthetic fleets in a temp dir, so it needs NO siblings and
+      # runs unconditionally on EVERY checkout, including the bare CI clone. It is the
+      # one INC-16 check that can never be skipped.
+      - name: Run the INC-16 CI-guard layout test (the guard must fire under BOTH layouts)
+        run: sh artifacts/incident/verify_inc16_ci_guard_layouts.sh
