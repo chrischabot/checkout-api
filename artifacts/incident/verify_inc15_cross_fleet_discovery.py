@@ -37,7 +37,12 @@ GATES
   G6  NEGATIVE CONTROL -- genuinely-absent siblings still SKIP (exit 0), so the
       repair does not leave `checkout-api` CI permanently red (the INC-11 bug)
   G7  strict mode refuses to pass un-run gates (exit 1, FATAL)
-  G8  no production drift: all 3 sources byte-identical to their baselines
+  G8  no SELF-INFLICTED drift: this verifier restored every byte it mutated.
+      (INC-22: this used to require every deployed source to match a hardcoded
+      sha256 baseline, and was FATAL on any difference -- so it hard-failed the
+      instant an owner landed the INC-6 billing repair the commander has been
+      asking for. An owner edit is now reported as PROVENANCE, never fatal;
+      drift caused by THIS VERIFIER'S OWN mutation testing is still fatal.)
 
 G5 is the load-bearing gate. It does not merely assert the new code works -- it
 proves the OLD code was blind on the SAME filesystem. Had both implementations
@@ -66,9 +71,26 @@ VERIFIER = CHECKOUT_API / "artifacts" / "incident" / "verify_inc9_ci_gate.py"
 TARGET = FLEET / "fabric-ic-incident-target"
 GATEWAY = FLEET / "fabric-gateway-demo"
 
-# Deployed revisions, recorded before this run touched anything. FULL sha256 --
-# a truncated prefix is a weaker assertion than the one we can trivially make.
-BASELINES = {
+# Deployed revisions as recorded on the day this gate was written. These are kept
+# as PROVENANCE REFERENCE VALUES ONLY -- never as a pass/fail baseline.
+#
+# INC-22: G8 used to require every deployed source to be byte-identical to these
+# constants, and was FATAL on any difference. That is a merge-time fact frozen into
+# a permanent gate: it encodes "nobody has fixed the billing defects yet", which is
+# a statement about the CALENDAR, not about correctness. The instant an owner landed
+# the INC-6 repair this commander has escalated for seven consecutive runs, this gate
+# went hard RED on a repo where nothing was wrong -- punishing the remediation it
+# exists to request. Reproduced by execution before repairing: the correct owner fix
+# (tier from the eligible items' mean price) took the $300/one-$10-item order from a
+# leaking $255.00 to the contractual $300.00, and turned G8 RED (8/9, exit 1), which
+# also reddened INC-19's G1 (6/7) because it re-runs this verifier.
+#
+# What G8 legitimately protects is THIS VERIFIER'S OWN SIDE EFFECTS: it mutates files
+# during mutation testing and must restore every one. That is a property of this
+# process, not of the fleet's bug backlog. So it now compares a start-of-run SNAPSHOT
+# against the bytes on disk at the end. Drift caused BY US stays fatal; an owner's
+# edit is reported as provenance.
+PROVENANCE_REFERENCE = {
     CHECKOUT_API / "service" / "checkout" / "session.js":
         "b45a8eeceaa142dd70aea4182930d02edb2d23ce90f0f02527910abb5f18d7e8",
     GATEWAY / "service" / "usage_aggregator.py":
@@ -76,6 +98,29 @@ BASELINES = {
     TARGET / "checkout.py":
         "da2a02fd87aec668467114e0bc30ff7c2fe7fd3d8f105f5f156361b9c87c5c5e",
 }
+
+# Backwards-compatible alias: the INC-21/INC-22 witness gates parse this symbol to
+# anchor their necessity witness to the frozen historical constant.
+BASELINES = PROVENANCE_REFERENCE
+
+
+def _snapshot_sources() -> dict:
+    """Hash every deployed source PRESENT on disk, right now, before we touch it.
+
+    This is the honest anchor for a no-drift gate: it asks "did WE move these
+    bytes?", which is always a real defect, instead of "are these bytes the ones
+    that were deployed on the day I was written?", which expires the moment
+    somebody legitimately fixes a bug.
+    """
+    snap = {}
+    for path in PROVENANCE_REFERENCE:
+        if path.is_file():
+            snap[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return snap
+
+
+# Taken at import time, before any gate runs and before any mutation testing.
+START_OF_RUN = _snapshot_sources()
 
 RESULTS: list[tuple[str, bool, str]] = []
 SKIPPED: list[tuple[str, str]] = []
@@ -446,22 +491,51 @@ def main() -> int:
     # Hash only the files that EXIST here. On a bare checkout the sibling sources
     # are absent -- reading them raised FileNotFoundError and crashed the verifier
     # in CI. An absent file is not drift; it is a different environment.
-    drift = []
+    #
+    # INC-22: the comparison is against the START-OF-RUN SNAPSHOT, not against a
+    # frozen constant. Bytes that moved DURING OUR OWN RUN mean this verifier failed
+    # to restore something it mutated -- always a real defect, still FATAL. Bytes that
+    # differ from the historical reference but are STABLE across our run are an OWNER
+    # EDIT (e.g. finally landing the INC-6 fix) -- reported as provenance, never fatal.
+    self_inflicted_drift = []
+    owner_edits = []
     checked = 0
-    for path, expected in BASELINES.items():
+    for path in PROVENANCE_REFERENCE:
         if not path.is_file():
             continue
         checked += 1
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
-        if actual != expected:
-            drift.append(f"{path.name}: {actual} != {expected}")
+
+        started_as = START_OF_RUN.get(path)
+        if started_as is not None and actual != started_as:
+            # WE moved these bytes and did not put them back. Fatal.
+            self_inflicted_drift.append(
+                f"{path.name}: MUTATED ACROSS OUR OWN RUN ({started_as[:12]} -> {actual[:12]})"
+            )
+            continue
+
+        if actual != PROVENANCE_REFERENCE[path]:
+            # Stable across our run, but not the revision recorded when this gate was
+            # written. That is somebody fixing a bug. It is NOT our business to fail it.
+            owner_edits.append(
+                f"{path.name}: differs from historical reference "
+                f"({PROVENANCE_REFERENCE[path][:12]} -> {actual[:12]}), stable across our run "
+                f"= OWNER EDIT (reported, not fatal)"
+            )
+
+    if owner_edits:
+        for note in owner_edits:
+            print(f"[PROVENANCE] G8 {note}")
+
     gate(
-        "G8 NO PRODUCTION DRIFT — every deployed source PRESENT here matches its baseline",
-        not drift and checked > 0,
-        f"{checked}/{len(BASELINES)} sources present and byte-identical on the FULL sha256"
+        "G8 NO SELF-INFLICTED DRIFT — this verifier restored every byte it mutated",
+        not self_inflicted_drift and checked > 0,
+        f"{checked}/{len(PROVENANCE_REFERENCE)} sources present; "
+        f"{len(owner_edits)} owner edit(s) reported as provenance; "
+        f"0 mutated across our own run"
         + ("" if siblings_present else " (siblings absent in this checkout: not drift)")
-        if not drift
-        else "; ".join(drift),
+        if not self_inflicted_drift
+        else "; ".join(self_inflicted_drift),
     )
 
     # -------------------------------------------------------------- summary --

@@ -164,3 +164,45 @@ jobs:
       # present -- so this step cannot become the permanently-red INC-11 bug.
       - name: Run the INC-19 gate (witnesses must not depend on ambient layout or gate counts)
         run: python3 artifacts/incident/verify_inc19_layout_and_count_invariance.py
+
+      # INC-22 (Fabric autonomous incident commander).
+      #
+      # verify_inc15_cross_fleet_discovery.py gate G8 ("NO PRODUCTION DRIFT")
+      # required every deployed source to be byte-identical to a HARDCODED sha256
+      # baseline, and was FATAL on any difference.
+      #
+      # That is a merge-time fact frozen into a permanent gate: it encodes "nobody
+      # has fixed the billing defects yet" -- a statement about THE CALENDAR, not
+      # about correctness. And its consequence points OUTWARD, at the owners.
+      #
+      # Reproduced by execution before repairing: land the CORRECT INC-6 repair that
+      # this commander has escalated for seven consecutive runs (tier chosen from the
+      # eligible items' mean price -- taking the $300 order with one $10 eligible item
+      # from a leaking $255.00 to the contractual $300.00), and on that HEALTHY tree:
+      #
+      #     verify_inc15_cross_fleet_discovery.py       -> exit 1, [FAIL] G8   (8/9)
+      #     verify_inc19_layout_and_count_invariance.py -> exit 1, [FAIL] G1   (6/7)
+      #
+      # One root cause, two red gates (INC-19's G1 re-runs the INC-15 verifier). The
+      # owner does precisely the thing we keep asking for, and CI goes hard RED on a
+      # repo where nothing is wrong. A gate that PUNISHES THE REMEDIATION IT EXISTS TO
+      # REQUEST is worse than no gate at all -- it teaches the owners that our red is
+      # noise. INC-21 (PR #24) diagnosed this and never merged, so it was still live.
+      #
+      # The repair asserts the INVARIANT, not the calendar: G8 compares a START-OF-RUN
+      # SNAPSHOT against the bytes on disk at the end. Drift caused by the verifier's
+      # OWN mutation testing is still FATAL; an owner's edit is reported as PROVENANCE.
+      #
+      # ANTI-WEAKENING: simply DELETING G8 would also have turned the red gate green.
+      # The INC-22 verifier's G5 sabotages the verifier to leave production mutated
+      # across its own run and requires it to STILL go red -- which is the difference
+      # between a correction and a cover-up.
+      #
+      # SAFETY: no production source is touched; all mutation testing happens in
+      # throwaway fleet copies. On this bare CI checkout the cross-fleet witnesses
+      # need the sibling SOURCES, so they report SKIPPED (never a pass, never a hard
+      # failure) while the STATIC G0 gate still asserts the repair is present with no
+      # siblings required -- so this step cannot become the permanently-red INC-11 bug
+      # it diagnoses, while stripping the repair still reddens CI.
+      - name: Run the INC-22 gate (a gate must never punish an owner for landing the fix)
+        run: python3 artifacts/incident/verify_inc22_drift_gate_punishes_owner_fix.py
