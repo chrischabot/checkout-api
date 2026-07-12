@@ -200,3 +200,43 @@ jobs:
       # gate green, and it FAILS the INC-23 G5 witness. Correction, not cover-up.
       - name: Run the INC-23 gate (the drift gate must not punish an owner's billing repair)
         run: python3 artifacts/incident/verify_inc23_drift_gate_punishes_owner_fix.py
+
+      # INC-30 (Fabric autonomous incident commander).
+      #
+      # Strict cross-fleet mode can be requested TWO ways, and they are supposed to
+      # mean the SAME THING:
+      #
+      #     python3 verify_x.py --require-cross-fleet          (argv)
+      #     FABRIC_REQUIRE_CROSS_FLEET=1 python3 verify_x.py   (environment)
+      #
+      # An independent cross-mode sweep (every verifier x 3 invocation modes, run in
+      # BOTH the fleet workspace and a synthetic bare checkout) found FIVE verifiers
+      # whose VERDICT DEPENDED ON WHICH SPELLING WAS USED:
+      #
+      #   fleet workspace : inc15, inc19, inc23  -> argv-strict exit 0 / env-strict exit 1
+      #   bare checkout   : inc12, inc18         -> argv-strict exit 0 / env-strict exit 1
+      #
+      # A verdict that depends on HOW the request was spelled is not a verdict.
+      #
+      # ROOT CAUSE: not one verifier-launching `subprocess.run()` passed `env=`, so
+      # Python handed the child the parent's ENTIRE environment and the strict flag
+      # LEAKED into children that must not receive it -- including NEGATIVE CONTROLS
+      # that require the child to SKIP (a control that inherits the flag it is
+      # controlling for is not a control), and the inc12/inc18 gates that merely ask
+      # "does the shipped INC-9 verifier pass on this tree?" (in a bare checkout it
+      # must be free to SKIP its cross-fleet gates; the leaked flag forbade that and
+      # produced a FALSE failure unrelated to the property under test).
+      #
+      # THE RULE: an intent must be PASSED to the child that should receive it, never
+      # INHERITED by a child that must not. `child_env()` ALWAYS scrubs the variable
+      # and re-sets it ONLY on explicit request -- the strict-mode FEATURE is intact.
+      #
+      # SAFETY: gate/verifier surface only; no production source touched. This step is
+      # GREEN on a bare checkout (7/7, exit 0 -- exactly what CI clones), so it cannot
+      # become the INC-11 permanently-red bug; and it goes RED (4/7) if the scrub is
+      # stripped, so it still bites. Its G4 gate proves this is a CORRECTION and not a
+      # cover-up: simply DELETING strict mode would also have turned the reds green,
+      # and it FAILS G4, which requires strict mode to still hard-fail when legitimately
+      # requested.
+      - name: Run the INC-30 gate (a strict-mode intent must be passed, never inherited)
+        run: python3 artifacts/incident/verify_inc30_strict_mode_env_leak.py

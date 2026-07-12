@@ -63,6 +63,7 @@ Exit: 0 = every executed gate passed.
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import re
 import shutil
@@ -87,6 +88,22 @@ BASELINES = {
 
 RESULTS: list[tuple[str, bool, str]] = []
 SKIPPED: list[tuple[str, str]] = []
+
+# INC-30: strict cross-fleet mode is honoured through an environment variable, and
+# a bare `subprocess.run()` (no `env=`) leaks it into every child. This file's
+# witnesses run child verifiers against synthetic trees whose siblings are
+# deliberately absent; an inherited strict flag forces those children to hard-fail
+# for a reason unrelated to the property under test. Strict mode is still passed
+# explicitly via argv (`*args`) when a caller genuinely wants it.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)   # ALWAYS scrubbed
+    if strict:
+        env[STRICT_ENV_VAR] = "1"   # ...re-set ONLY on request
+    return env
 
 
 def gate(name: str, ok: bool, detail: str = "") -> None:
@@ -134,7 +151,8 @@ def siblings_here():
 
 def run(cwd: pathlib.Path, rel: str, *args: str):
     p = subprocess.run(
-        [sys.executable, rel, *args], cwd=str(cwd), capture_output=True, text=True, timeout=900
+        [sys.executable, rel, *args], cwd=str(cwd), env=child_env(),
+        capture_output=True, text=True, timeout=900
     )
     return p.returncode, p.stdout + p.stderr
 

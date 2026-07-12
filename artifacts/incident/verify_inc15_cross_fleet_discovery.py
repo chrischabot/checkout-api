@@ -99,6 +99,23 @@ BASELINES = {
 RESULTS: list[tuple[str, bool, str]] = []
 SKIPPED: list[tuple[str, str]] = []
 
+# INC-30: strict cross-fleet mode is honoured through an environment variable, and
+# a bare `subprocess.run()` (no `env=`) leaks it into children. Several children
+# here are NEGATIVE CONTROLS: they run against a synthetic bare checkout and the
+# control REQUIRES the child to SKIP its cross-fleet gates and exit 0. A control
+# that inherits the very flag it is controlling for is not a control -- the child
+# is forced into strict mode and hard-fails exactly where the control demands a
+# skip. ALWAYS scrub; re-set only on explicit request.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)   # ALWAYS scrubbed
+    if strict:
+        env[STRICT_ENV_VAR] = "1"   # ...re-set ONLY on request
+    return env
+
 
 def _snapshot_now() -> dict[pathlib.Path, str]:
     """Hash the deployed sources AS THEY ARE RIGHT NOW (verifier start).
@@ -151,9 +168,13 @@ def skip(name: str, detail: str = "") -> None:
 
 
 def run_verifier(cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
+    # INC-30: strict mode is passed EXPLICITLY via argv (`*args`) when the caller
+    # wants it. It must never arrive by environment inheritance -- otherwise a
+    # negative control that requires a SKIP inherits the flag and hard-fails.
     return subprocess.run(
         [sys.executable, "artifacts/incident/verify_inc9_ci_gate.py", *args],
         cwd=str(cwd),
+        env=child_env(),
         capture_output=True,
         text=True,
         timeout=600,

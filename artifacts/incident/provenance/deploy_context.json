@@ -1,0 +1,563 @@
+{
+  "correlation": [
+    {
+      "claim": "EXHAUSTIVE file history (1 commit(s) walked to the end). The file first appeared at 71c0d6206b66 (2026-07-08T12:42:35Z), so the defect CANNOT predate that commit -- it is a hard upper bound on the exposure window. File-level, not line-level: the defective line may have arrived in a later commit, so the true window is a SUBSET of this one.",
+      "commits_touching_file": 1,
+      "currently_deployed": {
+        "date": "2026-07-08T12:42:35Z",
+        "message": "Add tiered volume discounts to checkout (#1)",
+        "sha": "71c0d6206b66"
+      },
+      "defect": "INC-6 (checkout discount leak)",
+      "exposure_window_opens_at_or_after": "2026-07-08T12:42:35Z",
+      "file": "checkout.py",
+      "file_first_appeared": {
+        "date": "2026-07-08T12:42:35Z",
+        "message": "Add tiered volume discounts to checkout (#1)",
+        "sha": "71c0d6206b66"
+      },
+      "granularity": "file-level (not line-level blame)",
+      "history_exhaustive": true,
+      "note": "How many customers were affected inside this window CANNOT be derived from deploy context alone -- that requires production telemetry, which is dark this run. The window is reported; the impact is NOT estimated.",
+      "repo": "chrischabot/fabric-ic-incident-target"
+    },
+    {
+      "claim": "EXHAUSTIVE file history (2 commit(s) walked to the end). The file first appeared at f63682c249ff (2026-07-11T02:32:14Z), so the defect CANNOT predate that commit -- it is a hard upper bound on the exposure window. File-level, not line-level: the defective line may have arrived in a later commit, so the true window is a SUBSET of this one.",
+      "commits_touching_file": 2,
+      "currently_deployed": {
+        "date": "2026-07-11T02:32:40Z",
+        "message": "Add per-model usage breakdown to /v1/usage (#1)",
+        "sha": "e3680054c178"
+      },
+      "defect": "INC-5 (malformed record kills batch)",
+      "exposure_window_opens_at_or_after": "2026-07-11T02:32:14Z",
+      "file": "service/usage_aggregator.py",
+      "file_first_appeared": {
+        "date": "2026-07-11T02:32:14Z",
+        "message": "Add usage aggregator (pre-incident baseline)",
+        "sha": "f63682c249ff"
+      },
+      "granularity": "file-level (not line-level blame)",
+      "history_exhaustive": true,
+      "note": "How many customers were affected inside this window CANNOT be derived from deploy context alone -- that requires production telemetry, which is dark this run. The window is reported; the impact is NOT estimated.",
+      "repo": "chrischabot/fabric-gateway-demo"
+    },
+    {
+      "claim": "EXHAUSTIVE file history (2 commit(s) walked to the end). The file first appeared at f63682c249ff (2026-07-11T02:32:14Z), so the defect CANNOT predate that commit -- it is a hard upper bound on the exposure window. File-level, not line-level: the defective line may have arrived in a later commit, so the true window is a SUBSET of this one.",
+      "commits_touching_file": 2,
+      "currently_deployed": {
+        "date": "2026-07-11T02:32:40Z",
+        "message": "Add per-model usage breakdown to /v1/usage (#1)",
+        "sha": "e3680054c178"
+      },
+      "defect": "INC-8 (null model -> None bucket)",
+      "exposure_window_opens_at_or_after": "2026-07-11T02:32:14Z",
+      "file": "service/usage_aggregator.py",
+      "file_first_appeared": {
+        "date": "2026-07-11T02:32:14Z",
+        "message": "Add usage aggregator (pre-incident baseline)",
+        "sha": "f63682c249ff"
+      },
+      "granularity": "file-level (not line-level blame)",
+      "history_exhaustive": true,
+      "note": "How many customers were affected inside this window CANNOT be derived from deploy context alone -- that requires production telemetry, which is dark this run. The window is reported; the impact is NOT estimated.",
+      "repo": "chrischabot/fabric-gateway-demo"
+    }
+  ],
+  "credential_present": false,
+  "repos": {
+    "checkout-api": {
+      "attempted": [
+        {
+          "error": null,
+          "path": "/repos/chrischabot/checkout-api/commits?per_page=10",
+          "status": 200
+        },
+        {
+          "error": null,
+          "path": "/repos/chrischabot/checkout-api/actions/runs?per_page=10",
+          "status": 200
+        },
+        {
+          "error": null,
+          "path": "/repos/chrischabot/checkout-api/pulls?state=open&per_page=20",
+          "status": 200
+        }
+      ],
+      "deploys": [
+        {
+          "date": "2026-07-12T03:43:53Z",
+          "message": "INC-23: repair the G8 drift gate so it no longer punishes an owner's billing fix (#26)",
+          "sha": "8fdfdd46e274"
+        },
+        {
+          "date": "2026-07-12T01:22:41Z",
+          "message": "INC-19: witness gates must not depend on ambient directory names or a hardcoded gate count (#22)",
+          "sha": "e2c372bb62e3"
+        },
+        {
+          "date": "2026-07-12T01:13:11Z",
+          "message": "INC-18: gates assert the billing defects are still broken \u2014 stop punishing the owner's fix (#20)",
+          "sha": "236820179445"
+        },
+        {
+          "date": "2026-07-11T23:52:23Z",
+          "message": "INC-15: repair the blind cross-fleet discovery; a skip can no longer count as a pass (#14)",
+          "sha": "5f70fae86dbb"
+        },
+        {
+          "date": "2026-07-11T21:33:11Z",
+          "message": "INC-12 follow-up: CI gate must not forbid the repo from being edited (G3); divergence must be attributable (G5) (#12)",
+          "sha": "6581202b8c12"
+        },
+        {
+          "date": "2026-07-11T21:19:01Z",
+          "message": "INC-12: run the merged INC-9 mutation-witness verifier in CI, and repair its G3 over-reach (#9)",
+          "sha": "37346c472a9c"
+        },
+        {
+          "date": "2026-07-11T20:50:04Z",
+          "message": "INC-11: make verify_inc9 G3 idempotent (it went permanently red at merge)",
+          "sha": "e87eb6fe354c"
+        },
+        {
+          "date": "2026-07-11T19:11:30Z",
+          "message": "INC-9: run the dormant INC-1 regression guard on every PR (Fabric run 8)",
+          "sha": "6f2db268a39d"
+        },
+        {
+          "date": "2026-07-11T15:26:12Z",
+          "message": "test(session): add cold-cache resume regression suite (INC-1 follow-up) (#3)",
+          "sha": "68d87f27139e"
+        },
+        {
+          "date": "2026-07-11T15:11:50Z",
+          "message": "fix(session): guard null auth blob on cold-cache resume path (INC-1)",
+          "sha": "2b5266500273"
+        }
+      ],
+      "open_prs": [
+        {
+          "created_at": "2026-07-12T11:02:23Z",
+          "head": "fabric/inc-30-strict-mode-env-leak",
+          "number": 30,
+          "title": "INC-30: a strict-mode flag leaked into child verifiers \u2014 so five gates gave a different verdict depending on h",
+          "url": "https://github.com/chrischabot/checkout-api/pull/30"
+        },
+        {
+          "created_at": "2026-07-12T10:46:59Z",
+          "head": "fabric/inc30-strict-mode-must-not-leak-into-child-verifiers",
+          "number": 29,
+          "title": "INC-30: a strict-mode flag leaked into child verifiers \u2014 so one env var turned a healthy fleet red in three ve",
+          "url": "https://github.com/chrischabot/checkout-api/pull/29"
+        },
+        {
+          "created_at": "2026-07-12T10:21:00Z",
+          "head": "fabric/inc29-strict-mode-leak-in-the-two-verifiers-inc28-missed",
+          "number": 28,
+          "title": "INC-29: the strict-mode flag still leaked into the two verifiers INC-28 missed (supersedes #27)",
+          "url": "https://github.com/chrischabot/checkout-api/pull/28"
+        },
+        {
+          "created_at": "2026-07-12T09:18:18Z",
+          "head": "fabric/inc28-strict-mode-flag-must-not-leak-into-negative-controls",
+          "number": 27,
+          "title": "INC-28: a strict-mode flag leaked into the negative controls \u2014 so setting one env var turned a healthy fleet r",
+          "url": "https://github.com/chrischabot/checkout-api/pull/27"
+        }
+      ],
+      "reason": "10 deploy(s), 10 CI run(s), 4 open PR(s) retrieved",
+      "repo": "chrischabot/checkout-api",
+      "status": "pulled",
+      "workflow_runs": [
+        {
+          "branch": "fabric/inc-30-strict-mode-env-leak",
+          "conclusion": "success",
+          "created_at": "2026-07-12T11:25:20Z",
+          "name": "CI",
+          "sha": "0bf5a883f3b1",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/checkout-api/actions/runs/29190796407"
+        },
+        {
+          "branch": "fabric/inc-30-strict-mode-env-leak",
+          "conclusion": "success",
+          "created_at": "2026-07-12T11:02:26Z",
+          "name": "CI",
+          "sha": "76dbf39d286b",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/checkout-api/actions/runs/29190146667"
+        },
+        {
+          "branch": "fabric/inc30-strict-mode-must-not-leak-into-child-verifiers",
+          "conclusion": "success",
+          "created_at": "2026-07-12T10:48:38Z",
+          "name": "CI",
+          "sha": "fb9b7d37625d",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/checkout-api/actions/runs/29189744760"
+        },
+        {
+          "branch": "fabric/inc30-strict-mode-must-not-leak-into-child-verifiers",
+          "conclusion": "success",
+          "created_at": "2026-07-12T10:47:02Z",
+          "name": "CI",
+          "sha": "2234eb32dec5",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/checkout-api/actions/runs/29189702280"
+        },
+        {
+          "branch": "fabric/inc29-strict-mode-leak-in-the-two-verifiers-inc28-missed",
+          "conclusion": "success",
+          "created_at": "2026-07-12T10:37:46Z",
+          "name": "CI",
+          "sha": "eac79775ab72",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/checkout-api/actions/runs/29189438283"
+        },
+        {
+          "branch": "fabric/inc29-strict-mode-leak-in-the-two-verifiers-inc28-missed",
+          "conclusion": "success",
+          "created_at": "2026-07-12T10:22:09Z",
+          "name": "CI",
+          "sha": "c1582806ceae",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/checkout-api/actions/runs/29189010398"
+        },
+        {
+          "branch": "fabric/inc29-strict-mode-leak-in-the-two-verifiers-inc28-missed",
+          "conclusion": "success",
+          "created_at": "2026-07-12T10:22:08Z",
+          "name": "CI",
+          "sha": "c1582806ceae",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/checkout-api/actions/runs/29189010239"
+        },
+        {
+          "branch": "fabric/inc28-strict-mode-flag-must-not-leak-into-negative-controls",
+          "conclusion": "success",
+          "created_at": "2026-07-12T09:18:22Z",
+          "name": "CI",
+          "sha": "117ddaa017e2",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/checkout-api/actions/runs/29187252111"
+        },
+        {
+          "branch": "main",
+          "conclusion": "success",
+          "created_at": "2026-07-12T03:43:56Z",
+          "name": "CI",
+          "sha": "8fdfdd46e274",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/checkout-api/actions/runs/29178659283"
+        },
+        {
+          "branch": "fabric/inc-23-drift-gate-punishes-owner-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T03:33:57Z",
+          "name": "CI",
+          "sha": "d19592d99742",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/checkout-api/actions/runs/29178421896"
+        }
+      ]
+    },
+    "fabric-gateway-demo": {
+      "attempted": [
+        {
+          "error": null,
+          "path": "/repos/chrischabot/fabric-gateway-demo/commits?per_page=10",
+          "status": 200
+        },
+        {
+          "error": null,
+          "path": "/repos/chrischabot/fabric-gateway-demo/actions/runs?per_page=10",
+          "status": 200
+        },
+        {
+          "error": null,
+          "path": "/repos/chrischabot/fabric-gateway-demo/pulls?state=open&per_page=20",
+          "status": 200
+        }
+      ],
+      "deploys": [
+        {
+          "date": "2026-07-12T08:13:36Z",
+          "message": "INC-27/INC-28: billing gates must accept the owner's fix (verified by execution)",
+          "sha": "b55e4ff8507f"
+        },
+        {
+          "date": "2026-07-11T20:40:58Z",
+          "message": "INC-10: run the merged INC-5/INC-8 verifiers in CI (the gates existed; nothing executed them)",
+          "sha": "f2bcb74d6e4e"
+        },
+        {
+          "date": "2026-07-11T20:26:36Z",
+          "message": "INC-8: pin the null-model billing bucket on /v1/usage (test-only; no production change)",
+          "sha": "a077a7325cc1"
+        },
+        {
+          "date": "2026-07-11T19:27:41Z",
+          "message": "INC-5: characterization suite + CI gate for /v1/usage (no production change)",
+          "sha": "9f7cf5090fca"
+        },
+        {
+          "date": "2026-07-11T02:32:40Z",
+          "message": "Add per-model usage breakdown to /v1/usage (#1)",
+          "sha": "e3680054c178"
+        },
+        {
+          "date": "2026-07-11T02:32:14Z",
+          "message": "Add usage aggregator (pre-incident baseline)",
+          "sha": "f63682c249ff"
+        },
+        {
+          "date": "2026-07-11T02:32:00Z",
+          "message": "Initial commit",
+          "sha": "5a60ca8c9c80"
+        }
+      ],
+      "open_prs": [],
+      "reason": "7 deploy(s), 10 CI run(s), 0 open PR(s) retrieved",
+      "repo": "chrischabot/fabric-gateway-demo",
+      "status": "pulled",
+      "workflow_runs": [
+        {
+          "branch": "main",
+          "conclusion": "success",
+          "created_at": "2026-07-12T08:13:38Z",
+          "name": "CI",
+          "sha": "b55e4ff8507f",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-gateway-demo/actions/runs/29185501629"
+        },
+        {
+          "branch": "fabric/inc27-gates-must-accept-the-owners-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T07:51:06Z",
+          "name": "CI",
+          "sha": "3de9991f8e91",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-gateway-demo/actions/runs/29184885084"
+        },
+        {
+          "branch": "fabric/inc25-gate-no-longer-punishes-owner-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T07:05:17Z",
+          "name": "CI",
+          "sha": "0f10c837e415",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-gateway-demo/actions/runs/29183654057"
+        },
+        {
+          "branch": "fabric/inc25-gate-no-longer-punishes-owner-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T06:58:55Z",
+          "name": "CI",
+          "sha": "bca8a92f2756",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-gateway-demo/actions/runs/29183473110"
+        },
+        {
+          "branch": "fabric/inc25-gate-must-not-punish-owner-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T06:42:00Z",
+          "name": "CI",
+          "sha": "fc891b7406a4",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-gateway-demo/actions/runs/29183046708"
+        },
+        {
+          "branch": "fabric/inc25-gate-must-accept-the-owner-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T06:22:39Z",
+          "name": "CI",
+          "sha": "d6ab157ef675",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-gateway-demo/actions/runs/29182564341"
+        },
+        {
+          "branch": "fabric/inc24-gateway-gate-punishes-owner",
+          "conclusion": "success",
+          "created_at": "2026-07-12T05:03:37Z",
+          "name": "CI",
+          "sha": "8b0f0804665a",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-gateway-demo/actions/runs/29180607805"
+        },
+        {
+          "branch": "fabric/inc24-gateway-gate-punishes-owner",
+          "conclusion": "success",
+          "created_at": "2026-07-12T04:52:29Z",
+          "name": "CI",
+          "sha": "816feef95a73",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-gateway-demo/actions/runs/29180343211"
+        },
+        {
+          "branch": "fabric/inc24-gateway-gate-punishes-owner",
+          "conclusion": "success",
+          "created_at": "2026-07-12T04:39:33Z",
+          "name": "CI",
+          "sha": "316b91b85b27",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-gateway-demo/actions/runs/29180028318"
+        },
+        {
+          "branch": "fabric/inc21-gate-must-not-punish-owner",
+          "conclusion": "success",
+          "created_at": "2026-07-12T04:33:20Z",
+          "name": "CI",
+          "sha": "56f3b26a9381",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-gateway-demo/actions/runs/29179878485"
+        }
+      ]
+    },
+    "fabric-ic-incident-target": {
+      "attempted": [
+        {
+          "error": null,
+          "path": "/repos/chrischabot/fabric-ic-incident-target/commits?per_page=10",
+          "status": 200
+        },
+        {
+          "error": null,
+          "path": "/repos/chrischabot/fabric-ic-incident-target/actions/runs?per_page=10",
+          "status": 200
+        },
+        {
+          "error": null,
+          "path": "/repos/chrischabot/fabric-ic-incident-target/pulls?state=open&per_page=20",
+          "status": 200
+        }
+      ],
+      "deploys": [
+        {
+          "date": "2026-07-12T08:13:38Z",
+          "message": "INC-27/INC-28: checkout gate must accept the owner's fix (verified by execution)",
+          "sha": "6444f9f43d91"
+        },
+        {
+          "date": "2026-07-11T19:27:28Z",
+          "message": "INC-7: characterization suite + CI gate for the live checkout discount leak (no production change)",
+          "sha": "efc7c8c12703"
+        },
+        {
+          "date": "2026-07-08T12:42:35Z",
+          "message": "Add tiered volume discounts to checkout (#1)",
+          "sha": "71c0d6206b66"
+        },
+        {
+          "date": "2026-07-08T12:39:19Z",
+          "message": "Initial commit",
+          "sha": "8881db74d3e1"
+        }
+      ],
+      "open_prs": [],
+      "reason": "4 deploy(s), 10 CI run(s), 0 open PR(s) retrieved",
+      "repo": "chrischabot/fabric-ic-incident-target",
+      "status": "pulled",
+      "workflow_runs": [
+        {
+          "branch": "main",
+          "conclusion": "success",
+          "created_at": "2026-07-12T08:13:40Z",
+          "name": "CI",
+          "sha": "6444f9f43d91",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-ic-incident-target/actions/runs/29185502388"
+        },
+        {
+          "branch": "fabric/inc27-gates-must-accept-the-owners-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T07:50:18Z",
+          "name": "CI",
+          "sha": "58f2780a30bf",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-ic-incident-target/actions/runs/29184862710"
+        },
+        {
+          "branch": "fabric/inc25-gate-no-longer-punishes-owner-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T07:05:05Z",
+          "name": "CI",
+          "sha": "3042f074e5a1",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-ic-incident-target/actions/runs/29183648023"
+        },
+        {
+          "branch": "fabric/inc25-gate-no-longer-punishes-owner-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T06:58:20Z",
+          "name": "CI",
+          "sha": "ec8316db2ba5",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-ic-incident-target/actions/runs/29183458601"
+        },
+        {
+          "branch": "fabric/inc25-gate-must-not-punish-owner-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T06:41:56Z",
+          "name": "CI",
+          "sha": "e60c3c7cc61d",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-ic-incident-target/actions/runs/29183044901"
+        },
+        {
+          "branch": "fabric/inc26-checkout-gate-must-accept-the-owner-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T06:39:23Z",
+          "name": "CI",
+          "sha": "1e80a0d6a861",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-ic-incident-target/actions/runs/29182978971"
+        },
+        {
+          "branch": "fabric/inc26-checkout-gate-must-accept-the-owner-fix",
+          "conclusion": "success",
+          "created_at": "2026-07-12T06:30:30Z",
+          "name": "CI",
+          "sha": "291fe08def50",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-ic-incident-target/actions/runs/29182755768"
+        },
+        {
+          "branch": "fabric/inc24-suite-witness",
+          "conclusion": "success",
+          "created_at": "2026-07-12T06:09:43Z",
+          "name": "CI",
+          "sha": "1e6642baeb7b",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-ic-incident-target/actions/runs/29182236877"
+        },
+        {
+          "branch": "fabric/inc24-checkout-gate-punishes-owner",
+          "conclusion": "success",
+          "created_at": "2026-07-12T05:03:43Z",
+          "name": "CI",
+          "sha": "f949d9b6bdeb",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-ic-incident-target/actions/runs/29180610338"
+        },
+        {
+          "branch": "fabric/inc24-checkout-gate-punishes-owner",
+          "conclusion": "success",
+          "created_at": "2026-07-12T04:52:31Z",
+          "name": "CI",
+          "sha": "94029a085904",
+          "status": "completed",
+          "url": "https://github.com/chrischabot/fabric-ic-incident-target/actions/runs/29180344112"
+        }
+      ]
+    }
+  },
+  "run_utc": "2026-07-12T11:32:19.018591+00:00",
+  "summary": {
+    "repos_pulled": 3,
+    "repos_total": 3,
+    "total_ci_runs": 30,
+    "total_deploys": 21,
+    "total_open_prs": 4
+  }
+}

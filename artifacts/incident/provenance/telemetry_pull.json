@@ -1,0 +1,121 @@
+{
+  "gateway_logs": {
+    "candidates_checked": 15,
+    "entries": [],
+    "env_path": null,
+    "found": [],
+    "lines_read": 0,
+    "reason": "no gateway-log source: 15 candidate paths checked (plus FABRIC_GATEWAY_LOG_PATH, unset), 0 found. Mount a log path or set FABRIC_GATEWAY_LOG_PATH and this puller parses it with NO code change.",
+    "source": "gateway_logs",
+    "status": "unavailable"
+  },
+  "otel": {
+    "endpoint_env": null,
+    "env_vars": [],
+    "error_spans": [],
+    "negative_control": {
+      "detected": true,
+      "port": 38855
+    },
+    "probed": [
+      {
+        "backend": "jaeger",
+        "open": false,
+        "port": 16686
+      },
+      {
+        "backend": "tempo",
+        "open": false,
+        "port": 3200
+      },
+      {
+        "backend": "zipkin",
+        "open": false,
+        "port": 9411
+      },
+      {
+        "backend": "otlp-http",
+        "open": false,
+        "port": 4318
+      },
+      {
+        "backend": "otlp-grpc",
+        "open": false,
+        "port": 4317
+      },
+      {
+        "backend": "jaeger-collector",
+        "open": false,
+        "port": 14268
+      },
+      {
+        "backend": "otlp-legacy",
+        "open": false,
+        "port": 55681
+      },
+      {
+        "backend": "datadog-apm",
+        "open": false,
+        "port": 8126
+      },
+      {
+        "backend": "otel-health",
+        "open": false,
+        "port": 13133
+      },
+      {
+        "backend": "prometheus",
+        "open": false,
+        "port": 9090
+      },
+      {
+        "backend": "loki",
+        "open": false,
+        "port": 3100
+      }
+    ],
+    "reachable": [],
+    "reason": "no collector: 11 backends probed, 0 reachable; 0 OTEL*/OTLP* env vars. Negative control PASSED (port 38855 was detected), so 'closed' is a real measurement. Start a collector or set OTEL_EXPORTER_OTLP_ENDPOINT and this puller queries it with NO code change.",
+    "source": "otel",
+    "status": "unavailable",
+    "traces": []
+  },
+  "run_utc": "2026-07-12T11:32:16.532767+00:00",
+  "sentry": {
+    "attempted": [
+      {
+        "error": null,
+        "status": 200,
+        "url": "https://sentry.io/api/0/"
+      },
+      {
+        "body": "{\"detail\":\"Authentication credentials were not provided.\"}",
+        "error": null,
+        "status": 401,
+        "url": "https://sentry.io/api/0/organizations/"
+      }
+    ],
+    "base_url": "https://sentry.io",
+    "credential_present": false,
+    "issues": [],
+    "org": null,
+    "reason": "NO CREDENTIAL. Unauthenticated /api/0/ answered 200 (egress works); /api/0/organizations/ answered 401. Zero SENTRY* env vars. This is a MISSING SECRET, not a network block. Set SENTRY_AUTH_TOKEN (and optionally SENTRY_ORG) and this puller retrieves live issues with NO code change.",
+    "source": "sentry",
+    "status": "unavailable"
+  },
+  "summary": {
+    "blast_radius_estimable": false,
+    "gateway_log_entries": 0,
+    "otel_error_spans": 0,
+    "otel_traces": 0,
+    "sentry_issues": 0,
+    "sources_dark": [
+      "sentry",
+      "otel",
+      "gateway_logs"
+    ],
+    "sources_empty": [],
+    "sources_pulled": [],
+    "total_symptoms": 0
+  }
+}

@@ -61,6 +61,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import shutil
@@ -89,6 +90,21 @@ REPAIR_LINE = '    avg_cents = sum(i["price_cents"] for i in eligible_items) / n
 RESULTS: list[tuple[str, bool, str]] = []
 SKIPPED: list[tuple[str, str]] = []
 
+# INC-30: strict cross-fleet mode is honoured through an environment variable, and
+# a bare `subprocess.run()` (no `env=`) leaks it into child verifier processes.
+# This file's witnesses run child verifiers against synthetic trees with the
+# siblings deliberately absent -- an inherited strict flag forces them to
+# hard-fail for a reason unrelated to the property under test.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)   # ALWAYS scrubbed
+    if strict:
+        env[STRICT_ENV_VAR] = "1"   # ...re-set ONLY on request
+    return env
+
 
 def gate(name: str, ok: bool, detail: str = "") -> None:
     RESULTS.append((name, ok, detail))
@@ -106,7 +122,7 @@ def sha(p: pathlib.Path) -> str:
 
 def run(script: pathlib.Path, cwd: pathlib.Path) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(script)], cwd=str(cwd),
+        [sys.executable, str(script)], cwd=str(cwd), env=child_env(),
         capture_output=True, text=True, timeout=900,
     )
 
@@ -425,6 +441,7 @@ def main() -> int:
         )
         pr = subprocess.run(
             [sys.executable, str(probe), str(repaired_checkout)],
+            env=child_env(),
             capture_output=True, text=True, timeout=120,
         )
         vals = pr.stdout.split()

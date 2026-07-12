@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import subprocess
@@ -134,6 +135,23 @@ if GATEWAY is not None:
     BASELINES[GATEWAY] = "bb21e50f7b5dab4463b71984bbe86a5df2b6ba442ffeff84d9b70815781750e5"
 
 RESULTS = []
+
+# INC-30: G1 asks exactly one question -- "does the shipped INC-9 verifier pass on
+# the current tree?" In a bare checkout (what CI clones) INC-9 has no sibling
+# repos, so it correctly SKIPs its cross-fleet gates and exits 0. But a bare
+# `subprocess.run()` leaks FABRIC_REQUIRE_CROSS_FLEET into the child, forcing it
+# into strict mode where it hard-fails for want of siblings that are legitimately
+# absent -- and G1 then reports "INC-9 does not pass", which is FALSE and has
+# nothing to do with the property G1 tests.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)   # ALWAYS scrubbed
+    if strict:
+        env[STRICT_ENV_VAR] = "1"   # ...re-set ONLY on request
+    return env
 
 
 def gate(name, ok, detail=""):
@@ -340,6 +358,7 @@ def main():
     shipped = subprocess.run(
         [sys.executable, str(inc9)],
         cwd=str(CHECKOUT_API),
+        env=child_env(),
         capture_output=True,
         text=True,
         timeout=600,

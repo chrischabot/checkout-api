@@ -57,6 +57,7 @@ Exit 0 = every gate passed.
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import re
 import shutil
@@ -86,6 +87,32 @@ INC9 = REPO / "artifacts" / "incident" / "verify_inc9_ci_gate.py"
 TRACKED = [SRC, SUITE, CI, PKG, INC9]
 
 RESULTS: list[tuple[str, bool, str]] = []
+
+# INC-30 (Fabric autonomous incident commander).
+#
+# Strict cross-fleet mode is honoured through an ENVIRONMENT VARIABLE. A bare
+# `subprocess.run()` with no `env=` hands the child the parent's ENTIRE
+# environment -- so the flag LEAKS into child verifier processes that must not
+# receive it, forcing them into strict mode and making them hard-fail for want
+# of sibling repos that are legitimately absent (e.g. in the bare checkout CI
+# clones). The parent then reports a failure that has NOTHING to do with the
+# property it is testing.
+#
+#   An intent must be PASSED to the child that should receive it,
+#   never INHERITED by a child that must not.
+#
+# `child_env()` ALWAYS scrubs the variable, and re-sets it ONLY on explicit
+# request. The strict-mode feature itself is untouched at the top level: this
+# stops the flag LEAKING, it does not remove it.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)   # ALWAYS scrubbed
+    if strict:
+        env[STRICT_ENV_VAR] = "1"   # ...re-set ONLY on request
+    return env
 
 
 def gate(name: str, ok: bool, detail: str = "") -> None:
@@ -167,6 +194,7 @@ def main() -> int:
     inc9 = subprocess.run(
         [sys.executable, str(INC9)],
         cwd=str(REPO),
+        env=child_env(),
         capture_output=True,
         text=True,
         timeout=600,
@@ -251,6 +279,7 @@ def main() -> int:
         new_ci_verifier = subprocess.run(
             [sys.executable, str(sim / "artifacts" / "incident" / "verify_inc9_ci_gate.py")],
             cwd=str(sim),
+            env=child_env(),
             capture_output=True,
             text=True,
             timeout=600,
