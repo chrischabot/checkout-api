@@ -94,3 +94,28 @@ jobs:
       # That was the INC-11 bug and is deliberately not re-committed.
       - name: Run the INC-15 cross-fleet discovery gate (a skip must never count as a pass)
         run: python3 artifacts/incident/verify_inc15_cross_fleet_discovery.py
+
+      # INC-17 (Fabric autonomous incident commander).
+      #
+      # The INC-15 verifier's G6 NEGATIVE CONTROL asserted the nested INC-9
+      # verifier's tally had a denominator of literally six:
+      #
+      #     no_phantom_passes = bool(lm) and int(lm.group(2)) == 6
+      #
+      # That is a MERGE-TIME FACT frozen into a PERMANENT GATE. Add one ordinary
+      # gate to verify_inc9_ci_gate.py and the tally becomes 7/7, so G6 goes RED
+      # -- in CI -- while nothing is actually wrong. It punished the next
+      # contributor for extending the gate surface, which is the behaviour we
+      # WANT. That is the INC-11/INC-12 expired-precondition bug, committed
+      # inside the verifier written to police exactly this habit.
+      #
+      # G6 now asserts the INVARIANT instead of the constant: the denominator
+      # counts exactly the gates that EXECUTED, and a SKIPPED gate is in neither
+      # the numerator nor the denominator. Count-independent, so the gate surface
+      # can grow freely -- while a laundered skip is still caught (INC-17 G4).
+      #
+      # This step guards that repair, so it cannot rot back into a hardcoded
+      # count. It needs no sibling repos: every INC-17 gate runs on a bare
+      # checkout, so it is green in the job that runs it and never permanently red.
+      - name: Run the INC-17 gate-count-invariant gate (a meta-gate must not expire)
+        run: python3 artifacts/incident/verify_inc17_gate_count_invariant.py

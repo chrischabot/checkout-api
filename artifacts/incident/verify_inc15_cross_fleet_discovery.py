@@ -189,6 +189,43 @@ def gates_that_ran(blob: str) -> set[str]:
     return {g for g in ("G6a", "G6b", "G6c") if re.search(rf"^\[(PASS|FAIL)\] {g} ", blob, re.M)}
 
 
+def executed_gate_count(blob: str) -> int:
+    """How many gates actually EXECUTED, i.e. emitted a [PASS] or [FAIL] line.
+
+    INC-17. This exists because G6 below used to assert the nested verifier's
+    denominator was literally `== 6`:
+
+        no_phantom_passes = bool(lm) and int(lm.group(2)) == 6
+
+    That is a MERGE-TIME FACT frozen into a PERMANENT GATE -- it encodes "the
+    INC-9 verifier has exactly six gates", which was true only on the day it was
+    written. Add one ordinary gate to verify_inc9_ci_gate.py and the tally becomes
+    7/7, so G6 goes RED -- in CI -- while nothing is actually wrong. Reproduced
+    before repairing it: injecting a single trivially-true gate into the INC-9
+    verifier left INC-9 itself green (7/7, exit 0) but turned INC-15 into
+    8/9, exit 1, failing on G6.
+
+    That is EXACTLY the INC-11/INC-12 expired-precondition bug -- a gate that can
+    never pass again -- reproduced inside the verifier written to police the very
+    habit of shipping gates that cannot fail. It would have punished the next
+    contributor for extending the gate surface, which is the behaviour we WANT.
+
+    The durable invariant is not "there are six gates". It is:
+
+        the denominator counts exactly the gates that EXECUTED,
+        and a SKIPPED gate is in neither the numerator NOR the denominator.
+
+    That is what INC-15 was raised to enforce, it is count-independent, and it is
+    what this function measures.
+    """
+    return len(re.findall(r"^\[(?:PASS|FAIL)\] ", blob, re.M))
+
+
+def skipped_gate_count(blob: str) -> int:
+    """How many gates reported SKIPPED (never a pass, never in the denominator)."""
+    return len(re.findall(r"^\[SKIP\] ", blob, re.M))
+
+
 def main() -> int:
     print("Fabric incident commander — INC-15 verification gates\n")
     roots = [FLEET, CHECKOUT_API / "fleet", CHECKOUT_API, CHECKOUT_API.parent]
@@ -337,10 +374,26 @@ def main() -> int:
         lone = run_verifier(bare)
         lblob = lone.stdout + lone.stderr
         lran = gates_that_ran(lblob)
-        skipped_reported = "SKIPPED" in lblob
-        # The old bug: a skip folded into the pass tally.
+        n_skipped = skipped_gate_count(lblob)
+        skipped_reported = n_skipped > 0
         lm = re.search(r"^GATES: (\d+)/(\d+) passed", lblob, re.M)
-        no_phantom_passes = bool(lm) and int(lm.group(2)) == 6  # only the 6 real gates counted
+
+        # INC-17. The ORIGINAL INC-15 bug was a skip laundered into the pass
+        # tally, so this gate must still catch that. But it must catch it by the
+        # INVARIANT, not by a hardcoded `== 6` (see executed_gate_count.__doc__):
+        # the denominator must count exactly the gates that EXECUTED, with every
+        # SKIPPED gate excluded from BOTH the numerator and the denominator.
+        # Count-independent, so a future PR may freely add gates to the INC-9
+        # verifier without reddening this one.
+        n_executed = executed_gate_count(lblob)
+        denominator = int(lm.group(2)) if lm else -1
+        numerator = int(lm.group(1)) if lm else -1
+        no_phantom_passes = (
+            bool(lm)
+            and denominator == n_executed  # skips are NOT in the denominator
+            and numerator <= n_executed  # and cannot inflate the numerator
+            and denominator < n_executed + n_skipped  # a skip would push it higher
+        )
         gate(
             "G6 NEGATIVE CONTROL — absent siblings SKIP (exit 0), never a silent pass",
             lone.returncode == 0
@@ -348,8 +401,11 @@ def main() -> int:
             and skipped_reported
             and no_phantom_passes,
             f"bare checkout: exit={lone.returncode} cross-fleet executed={sorted(lran) or 'none'} "
-            f"SKIPPED reported={skipped_reported} tally={lm.group(0) if lm else 'none'} "
-            f"(un-run gates are NOT in the denominator, and CI is not permanently red)",
+            f"SKIPPED={n_skipped} tally={lm.group(0) if lm else 'none'} "
+            f"executed={n_executed} denominator={denominator} "
+            f"(invariant: denominator == executed, so the {n_skipped} un-run gate(s) are in "
+            f"NEITHER the numerator nor the denominator; CI is not permanently red, and "
+            f"adding a gate to the INC-9 verifier does not redden this one)",
         )
 
         # -------------------------------------------------------------- G7 --
