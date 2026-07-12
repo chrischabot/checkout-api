@@ -1,265 +1,188 @@
-# Fabric — Autonomous Production Incident Commander
-## Executive Incident Brief · run 2026-07-11 ~23:40 UTC
+# Executive Incident Brief — Fabric Autonomous Incident Commander
+
+**Run:** INC-18 · **2026-07-12 ~00:40 UTC**
+**Date provenance:** taken from the GitHub API `Date` response header this run. Several earlier reports in this fleet are stamped "2026-07-14" — that date is **wrong**, contradicted by their own GitHub timestamps, and is not copied forward here.
 
 **Fleet:** `chrischabot/checkout-api` · `chrischabot/fabric-gateway-demo` · `chrischabot/fabric-ic-incident-target`
 
+**This run shipped:** one **verifier + CI + brief** change. **No production source was modified.** All three deployed sources are byte-identical to their deployed revisions on the **full** sha256 (see §6).
+
 ---
 
-## 0. Bottom line
+## 1. Headline
 
-| | |
+> **The gate that polices this fleet's billing defects was asserting that those defects were STILL BROKEN.** The moment an owner lands the INC-6 / INC-5 / INC-8 repair the commander has escalated for **four consecutive runs**, `checkout-api` CI would have gone **hard RED on a healthy repo** — punishing the owners for doing exactly what we asked. That is patched, double-witness verified, and wired into CI.
+
+Nothing else in the fleet regressed. Every suite and every verifier is green on current `main`.
+
+---
+
+## 2. ⚠️ Telemetry coverage gap — read this before trusting any severity number
+
+**No telemetry plane was reachable this run.** Every one was attempted:
+
+| Plane | Attempted | Result |
+|---|---|---|
+| **Sentry issues** | `GET sentry.io/api/0/` | **HTTP 200** → `{"version":"0","auth":null,"user":null}` — no credential |
+| | `GET sentry.io/api/0/organizations/` | **HTTP 401** — "Authentication credentials were not provided." |
+| **OTEL / traces** | TCP 4317, 4318, 9411, 16686, 14268, 55681, 8126 | **ALL CLOSED** (no OTLP / Jaeger / Zipkin / Datadog collector) |
+| **Gateway logs** | filesystem + mount scan | **No source.** No gateway or access log on disk or mounted |
+| **PR / deploy context** | GitHub REST (connector) | ✅ **LIVE** — the only plane available (GraphQL quota: **0/0**) |
+
+**Consequence, stated plainly:** every behavioural claim below was established by **EXECUTING THE DEPLOYED SOURCE**, not by reading production telemetry. Findings are therefore *confirmed real and confirmed live* — but **blast radius (how many customers, orders, or invoices are affected) is UNKNOWN to the commander and is deliberately NOT estimated.** The owner queries needed to bound it are in §7. That step is the one only you can perform, and it is what determines true urgency.
+
+---
+
+## 3. Clustered incidents, urgency-ranked
+
+Symptoms are grouped by **root cause**, not by repository — the same defect class recurs across services.
+
+### Cluster A — Revenue / billing correctness · **OWNER DECISION REQUIRED** · not auto-patchable
+
+| # | Service | Defect (re-confirmed LIVE this run by executing deployed source) | Impact |
+|---|---|---|---|
+| **INC-6** | `fabric-ic-incident-target` | `apply_discount()` picks the tier from `subtotal / eligible_count`. A **$300 order with one $10 eligible item charges $255.00** — the contract requires $300.00. The item's price is **never read**; the function only calls `len()`. | **Silent revenue leak.** Worst on precisely the orders that deserve *no* discount; the leak scales inversely with eligible-item count. |
+| **INC-5** | `fabric-gateway-demo` | One malformed usage record → `KeyError` → **the entire `/v1/usage` batch dies.** | Loud availability loss on a billing path. |
+| **INC-8** | `fabric-gateway-demo` | `{'model': None, 'tokens': 10}` → `{'per_model': {None: 10}}` — **no error raised.** 10 billable tokens booked against a `None` key. | **Silent** invoice mis-attribution. |
+
+**Why the commander refuses to patch these — a decision, not an omission.**
+
+Every candidate repair **encodes a different invoicing policy**, and the repo contains no schema, caller, or test that names the authoritative one:
+
+- **INC-6** needs two answers the code cannot supply: *(i)* what is the per-item price field called? *(ii)* does the discount apply to the **eligible subtotal** or the **whole order**? The repo's own tests prove the tempting fixes are unsafe — `.get('price_cents', 0)` against a wrong key reads every item as **free**, selects the 0% tier, **charges $500.00 instead of $425.00 and reports success**; indexing instead throws `KeyError` on the checkout path, converting a silent leak into a **hard outage**.
+- **INC-5 and INC-8 are one decision, not two.** A repair guarding only the *absent* key passes a `None` value **straight through** — because the key *is* present. **Fixing INC-5 without deciding the null case leaves INC-8 live in production.**
+
+Guessing wrong here **corrupts customer invoices with no error signal** — the same class of failure as the bug itself. The commander will not invent billing semantics. **Routed to owners** (§7).
+
+### Cluster B — Verification integrity: gates that cannot do their job · **AUTO-PATCHED THIS RUN**
+
+This fleet has a signature failure mode, now on its **fifth** repetition: **an expired precondition — a merge-time fact frozen into a permanent gate.**
+
+| | The expired precondition |
 |---|---|
-| **Patched & verified this run** | **1** — INC-15: the fleet's cross-fleet re-confirmation gates were unreachable dead code reporting `6/6 passed` ([PR #14](https://github.com/chrischabot/checkout-api/pull/14), **CI green**) |
-| **Re-confirmed LIVE, owner-blocked** | **3** — INC-6 (checkout revenue leak), INC-5/3 (`/v1/usage` batch failure), INC-8 (null-model billing bucket) |
-| **Production source changed** | **NONE.** All 3 deployed sources byte-identical to their deployed revisions (full sha256) |
-| **Telemetry reachable** | **NONE.** Sentry unauthenticated, no OTEL collector, no gateway logs. **Blast radius is therefore UNKNOWN and is deliberately NOT estimated.** |
-| **Process defect fixed** | Duplicate-PR pile-up: PRs **#11** and **#13** both carried this repair and **neither merged**. Both now **closed as superseded** by #14 |
+| INC-11 | G3 asserted *"`ci.yml` is NEW"* — permanently false the instant it merged |
+| INC-12 | G3 required `ci.yml` byte-identical to `main` — forbade the repo from editing its own CI |
+| INC-15 | the cross-fleet gates were unreachable dead code; the skip was laundered into `6/6 passed` |
+| INC-17 | the gate policing that laundering **hardcoded the very count it was policing** (`== 6`) |
+| **INC-18 (this run)** | **the cross-fleet gates asserted the billing defects were STILL BROKEN — so they would hard-fail the moment an owner FIXED them** |
 
----
+**INC-18, precisely.** `artifacts/incident/verify_inc9_ci_gate.py` gates G6a/G6b/G6c were:
 
-## 1. Telemetry provenance — stated plainly
-
-The commander was asked for fresh Sentry issues, OTEL traces, gateway logs and PR/deploy context. **Three of those four sources were unreachable this run.** Each was probed, not assumed:
-
-| Source | Probe | Result |
-|---|---|---|
-| **Sentry** | `GET https://sentry.io/api/0/` | **HTTP 200** but `{"version":"0","auth":null,"user":null}` — reachable, **unauthenticated**. No credential in the environment. **Zero issue data.** |
-| **OTEL traces** | TCP connect to `4317`, `4318`, `9411`, `16686`, `14268` | **all closed.** No collector, no configured endpoint. |
-| **Gateway logs** | `/var/log/gateway`, `/var/log/fabric`, `/mnt/logs`, disk scan | **no source** on disk or mounted. |
-| **PR / deploy context** | GitHub REST connector | ✅ **LIVE** — the only source available. |
-
-**Consequence, and it is a real limitation:** every defect claim in this brief was established by **executing the deployed source**, not by reading production telemetry. The defects below are therefore *confirmed real and confirmed live* — but **how many customers, orders, or billable tokens have actually been affected is UNKNOWN to the commander.** No blast radius is estimated. The owner queries needed to bound it are in §6.
-
-*Absence of telemetry is not absence of incidents.* There may be live production failures this run could not see.
-
-**Date correction (carried forward):** several earlier reports in this fleet are stamped "2026-07-14". The system clock reads **2026-07-11**, and every GitHub timestamp agrees. The 2026-07-14 dates were a wrong date copied between runs.
-
----
-
-## 2. Symptom clustering
-
-Four distinct incidents, clustered by mechanism rather than by repo. All three repos share **one systemic cause**: *every incident this fleet has produced shipped through a PR that changed a code path no test executed.*
-
-### Cluster A — Silent revenue/billing corruption (3 incidents, ALL owner-blocked)
-
-These share a signature: **nothing throws, no error rate moves, no alert fires.** They are invisible to exactly the telemetry that is unavailable, which is why they were found by execution.
-
-| ID | Where | Re-confirmed live this run (by execution) |
-|---|---|---|
-| **INC-6** | `fabric-ic-incident-target` · `checkout.py::apply_discount()` | $300 order with one **$10** eligible item → **charges $255.00** (contract: $300.00). Item price ignored **entirely** — a $0.01 and a $299.99 eligible item give an identical discount. |
-| **INC-5/3** | `fabric-gateway-demo` · `usage_aggregator.py::aggregate_usage()` | One malformed record → `KeyError` → **the whole `/v1/usage` batch dies.** Loud, but takes good records with it. |
-| **INC-8** | same function | `{'model': None, 'tokens': 10}` → `{'per_model': {None: 10}}` — **no exception.** 10 billable tokens booked against a `None` key. Silent. |
-
-### Cluster B — Gates that cannot fail (the meta-incident, PATCHED this run)
-
-| ID | Finding | Status |
-|---|---|---|
-| **INC-15** | The verifier's cross-fleet gates (G6a/b/c) — the mechanism that re-confirms Cluster A is still live — **never executed in any environment**, and the skip was **laundered into a `6/6 passed` tally**. | ✅ **Patched + verified** |
-
----
-
-## 3. Urgency ranking
-
-| Rank | ID | Why this rank |
-|---|---|---|
-| **1** | **INC-6** | Live money leaving the business on every mixed order. Leak **scales inversely with eligible-item count** — worst on orders that deserve *no* discount. Silent. |
-| **2** | **INC-8** | Silently mis-attributes billable tokens to a `None` model. `grand_total` still reconciles, so **no reconciliation check can see it.** Unattributed, not rejected, revenue. |
-| **3** | **INC-5/3** | Destroys whole `/v1/usage` batches. Ranked below INC-8 only because it is **loud** — you lose the batch, but you know it happened. |
-| **4** | **INC-15** | No customer impact, but it is the incident that **hides the other three.** Fixed first precisely because it is the only one the commander is allowed to fix. |
-
----
-
-## 4. Fixability analysis
-
-### Why the three billing defects were NOT auto-patched
-
-This is the central judgment of the run, and it is deliberate.
-
-**INC-6** — a correct fix must read each eligible item's price. The deployed `apply_discount()` **never reads any field off the item dicts** — it only calls `len()` on them. No caller, no schema, no test, and no reachable telemetry names a price field. Two things are unknowable from any authoritative source:
-1. **What is the price field called?** (`price`, `price_cents`, `unit_price`…) The repo's own tests prove the tempting guesses are unsafe: `.get('price_cents', 0)` against a wrong key reads every item as free, selects the 0% tier, **charges $500.00 instead of $488.00 — and reports success.** Indexing instead throws `KeyError` on the checkout path, converting a silent revenue leak into a **hard outage**.
-2. **What is the discount's scope** — eligible subtotal only, or the whole order? These produce materially different customer charges.
-
-Both are **revenue policy**, not engineering. Guessing mischarges real customers with no error signal — *the same class of failure as the bug itself.*
-
-**INC-5/3 + INC-8** — these are one contract seen from two sides. Every candidate repair encodes a different **invoicing policy**:
-
-| Candidate | Billing consequence |
-|---|---|
-| reject the record (fail loud) | safest for invoice integrity; costs `/v1/usage` availability |
-| skip it + emit a metric | preserves availability, **under-bills silently** unless the alert is truly wired |
-| attribute to `model="unknown"` | preserves totals, **mis-attributes spend**, hides the producer bug |
-| leave as-is (today) | a `None` bucket silently pollutes per-model billing |
-
-Critically: **a repair guarding only *absent* keys (`record.get("model", "unknown")`) passes a `None` value straight through**, because the key *is* present — its value is null. **Fixing INC-5 without deciding the null case leaves INC-8 live in production.**
-
-> The commander will not invent billing semantics. Choosing one of these autonomously would corrupt customer invoices with no error signal. These are escalated, not guessed.
-
-### Why INC-15 WAS safe to patch
-
-Deterministic code defect · zero production surface · no policy content · a wrong directory name. Fully verifiable by execution.
-
----
-
-## 5. The patch — INC-15
-
-### The defect
-
-`checkout-api/artifacts/incident/verify_inc9_ci_gate.py` carries three cross-fleet gates (G6a/G6b/G6c) whose only job is to re-confirm — **by executing the deployed source** — that the three owner-blocked billing defects are still live. That is the mechanism that stops the commander from carrying findings forward on a previous run's word.
-
-Its sibling discovery searched for directories named:
-
-```
-incident-target/          gateway/
+```python
+leak == 25_500 and price_blind   # G6a — "INC-6 is still leaking"
+batch_died                       # G6b — "INC-5 still kills the batch"  (caught ONLY KeyError)
+silent_null                      # G6c — "INC-8 is still silent"
 ```
 
-The fleet repos are actually named **`fabric-ic-incident-target`** and **`fabric-gateway-demo`**.
+Each is a statement about **the calendar**, not about correctness. They hold only for as long as nobody fixes the billing defects. And there was a second, sharper edge: **G6b caught only `KeyError`** — so an owner choosing the *reject-loudly* policy (raising a custom `ValidationError`, the option **safest for invoice integrity**) would have sent an uncaught exception through the verifier and **crashed it outright**.
 
-The lookup **never matched — in any environment**, including the commander workspace it was written for. G6 always took the SKIP path, so **G6a/G6b/G6c never executed.** Worse, the skip path computed `passed == total` over only the gates that *had* run, printing a confident:
+> **A gate that punishes the remediation it exists to request is worse than no gate at all.** A gate that can never fail and a gate that can never pass teach the team the same lesson: *ignore the red.* That is the disease this fleet exists to cure.
 
-```
-GATES: 6/6 passed
-```
-
-…while **a third of the verifier was unreachable dead code.**
-
-That is this fleet's signature failure — *a gate that cannot fail is decoration* — **reproduced inside the verifier whose only job is to police it.** A skip laundered into a pass count is worse than a missing check: it actively asserts coverage it does not have.
-
-**Process finding:** PRs **#11** and **#13** each diagnosed this exact mismatch. **Neither merged.** The repair never reached `main`, so the blind discovery was still live — and a third consecutive run would have filed a third duplicate. That pile-up is itself a fleet pathology worth naming.
-
-### The repair (3 files, no production source)
-
-1. **Discovery matches the real repo names**, with the legacy names kept as **fallbacks** — the fix *adds* names, never replaces them, so other checkout layouts keep working (proven by G3 against a synthetic legacy layout).
-2. **A skip can no longer masquerade as a pass.** Skips are tracked in a separate list and reported as `SKIPPED`, structurally incapable of entering the pass tally or the denominator.
-3. **Strict mode** — `--require-cross-fleet` / `FABRIC_REQUIRE_CROSS_FLEET=1` — makes a missing sibling **FATAL** where the gates are expected to run.
-4. **The new verifier runs in CI**, so the repair is itself guarded.
-
-#### On strictness — why the skip is not *unconditionally* fatal
-
-`checkout-api` CI clones **only that repo**, so the siblings are legitimately absent there. Making the skip always fatal would leave the verifier **permanently red in the very CI job that runs it** — which is precisely the expired-precondition bug **INC-11/INC-12 were raised to repair.** Re-committing it would be a regression. The honest answer is a third state: **`SKIP`** — reported, never passed, promotable to fatal by a caller that knows the siblings ought to be there.
+**The repair — assert the invariant, not the calendar.** Defect liveness is now **REPORTED** as provenance (`STILL LIVE` / `REPAIRED UPSTREAM`); what is **ENFORCED** is the **policy-free baseline contract**: *well-formed input must still price and aggregate correctly.* Every candidate owner policy satisfies that baseline — so it can never punish a correct fix — while the tempting **broken** repairs fail it. This also keeps the commander from smuggling in the billing semantics it has repeatedly refused to invent.
 
 ---
 
-## 6. Verification — every number below was produced by a command run this turn
+## 4. Verification gates — INC-18 verifier: **6/6, exit 0**
 
-### INC-15 verifier — **8/8, exit 0**
+`artifacts/incident/verify_inc18_gate_punishes_remediation.py` ships here and **runs in CI**.
 
 | Gate | Result |
 |---|---|
-| G1 repaired verifier passes **AND the cross-fleet gates actually RAN** | **9/9, exit 0**, executed `['G6a','G6b','G6c']` — was **6/6 with all three unreachable** |
-| G2 the **DEPLOYED** verifier's discovery resolves both real repo names | both **FOUND** (drives the shipped `_find`/`_TARGET_DIRS`/`_GATEWAY_DIRS`, not a copy) |
-| G3 legacy names still resolve (fix adds, never replaces) | pass, against a synthetic legacy layout |
-| **G4 WITNESS A — pre-repair discovery is BLIND** | old logic finds **neither** sibling **despite both being present on the same filesystem** |
-| **G5 WITNESS B — DIVERGENCE (load-bearing)** | **OLD → skips all 3 gates · NEW → executes all 3** |
-| **G6 NEGATIVE CONTROL** | genuinely-absent siblings → **SKIPPED, exit 0**: never a silent pass, never permanently red |
-| G7 strict mode refuses to pass un-run gates | bare checkout + `--require-cross-fleet` → **exit 1, FATAL** |
-| G8 no production drift | 3/3 sources byte-identical on the **full sha256** |
+| G1 repaired INC-9 verifier passes as shipped | **fleet workspace 9/9, exit 0** · **bare checkout 6/6 (cross-fleet SKIPPED), exit 0** |
+| **G2 WITNESS A — the PRE-REPAIR predicates are broken by a correct owner fix** | witness anchored to a **frozen snapshot of the defect** (never to today's production): on a correctly repaired fleet the OLD predicates go `{G6a: False, G6b: False, G6c: False}` **and G6b crashes with `UsageRecordError`** → the old gates hard-fail a healthy repo |
+| **G3 WITNESS B — DIVERGENCE (load-bearing)** | same tree, one correct owner repair: **OLD G6 → REJECT** · **NEW G6 → PASS** |
+| **G4 ANTI-WEAKENING** | the broken INC-6 repair **charges $500.00 where the contract requires $425.00 → still REJECTED**; the broken INC-5/8 repair books `grand_total: 0` → **still REJECTED** |
+| G5 the INC-5 probe cannot CRASH the verifier | a reject-loudly repair raising `UsageRecordError` **escapes the OLD handler** (`escapes_old_handler=True`); the repaired probe catches it, reports the state, and the baseline still passes |
+| **G6 PROVENANCE ONLY — never fatal** | source drift vs the run baseline is **reported, never enforced** (see the self-correction below) |
 
-**G5 is the whole argument.** It does not merely assert the new code works — it proves the **old code was blind on the same filesystem** where the new code succeeds. Had both behaved alike, the repair would be a no-op and G5 would say so.
+**G3 is the whole argument.** It does not merely assert that the new predicate works — it proves the **old predicate hard-failed a healthy repo on the same tree** where the new one passes. Had both behaved alike, the repair would be a no-op, and G3 would say so.
 
-### The gate caught its own author — and CI is what caught it
+**G4 is the gate that matters most.** Making a red gate green is trivial and worthless. G4 feeds the new baseline the *tempting broken repairs* — the ones a hurried engineer would actually write — and requires it to **still go red**. It does. **This is a correction, not a relaxation.**
 
-Worth stating plainly, because it changed the patch and it is the most useful thing that happened this run.
+### The verifier caught ITSELF committing the bug — twice
 
-The first version of the CI step invoked the INC-15 verifier unconditionally. **GitHub Actions failed it immediately** ([run 29172630670](https://github.com/chrischabot/checkout-api/actions/runs/29172630670)):
+Worth stating plainly, because it is the most useful thing that happened this run and it changed the patch.
 
-```
-[FAIL] G1 ... cross-fleet gates executed=[]
-[FAIL] G2 ... fabric-ic-incident-target=MISSING fabric-gateway-demo=MISSING
-[FAIL] G5 ... NEW -> executes []
-FileNotFoundError: .../fabric-gateway-demo/service/usage_aggregator.py
-```
+The first draft of this verifier committed **the exact crime it prosecutes**, in two places:
 
-G1/G2/G5 **structurally require the sibling fleet repos**, and `checkout-api` CI clones only its own repo. So the gate could never pass there: **a permanently-red gate — the exact INC-11 expired-precondition bug, committed inside the very incident that diagnoses it.** A gate that can never pass is as worthless as one that can never fail; both teach the team to ignore the red.
+1. **G6 asserted hardcoded sha256 baselines and ran as a fatal CI step.** That is the INC-12 padlock (*any* legitimate future edit to `session.js` would hard-redden CI) **and** the INC-18 bug itself (in a fleet workspace, an owner **repairing** `usage_aggregator.py` or `checkout.py` changes those bytes and **fails the gate** — punishing the exact remediation the incident exists to request).
+2. **G2's `sim_valid` sanity check was anchored to the CURRENTLY DEPLOYED source.** The moment an owner repaired their billing file, the "deployed" tree stopped exhibiting the defect, `sim_valid` went `False`, and **G2 hard-failed CI.** Same crime, one layer deeper.
 
-The repair, and it is the honest shape:
+**Both were caught by *executing* an owner repair rather than by re-reading the code** — the second one was invisible to static review. Fixed: drift is **reported, never enforced**, and the witness is anchored to a **frozen snapshot of the defective behaviour**. A witness is a *record of the defect*, never a *demand about the state of production today*.
 
-- **Sibling-dependent gates (G1/G2/G4/G5) report `SKIPPED`** where the siblings are absent — excluded from the numerator **and the denominator**, so a skip can never become a pass, and never a false failure either.
-- **New `G2b`** — a *static* assertion that the shipped verifier still carries the real fleet repo names. It needs **no siblings**, so it guards the repair **inside CI**. This is what keeps the fix from rotting: strip a real name and G2b goes **RED on a bare checkout (4/5, exit 1)** — verified.
-- **`G0`** — strict mode still hard-fails (exit 1, FATAL) where the siblings are expected but missing.
-- **`G8`** hashes only the sources present; an absent file is a different environment, not drift.
+**Proven across four scenarios, all exit 0:**
 
-**Proven in all three environments:**
-
-| Environment | Result |
+| Scenario | Result |
 |---|---|
-| Commander workspace (all 3 repos) | **9/9, exit 0** — cross-fleet gates execute |
-| **Bare checkout (= `checkout-api` CI)** | **5/5 passed, 4 SKIPPED, exit 0** ✅ not permanently red |
-| Bare checkout + `--require-cross-fleet` | **exit 1, FATAL** ✅ refuses to pass un-run gates |
+| Unchanged fleet (all 3 repos present) | **6/6, exit 0** |
+| Bare checkout (= what `checkout-api` CI clones) | **6/6, exit 0** |
+| **Owners repair ALL THREE billing defects** | **6/6, exit 0** ✅ *(the pre-fix verifier scored 5/6, exit 1 here — it punished the fix)* |
+| **A normal future PR edits `session.js`** | **6/6, exit 0** ✅ *(drift reported as provenance; the repo is not padlocked)* |
 
-**GitHub Actions on the final head (`470e64f`): all 8 steps green**, including the INC-15 step — [run 29172700665](https://github.com/chrischabot/checkout-api/actions/runs/29172700665). The gate does not merely pass locally; it passes *in the job that runs it*, and it still bites there.
-
-### The gates provably bite (mutation test on the SHIPPED code)
-
-A gate made *green* rather than *correct* is worthless, so the repaired discovery was regressed back to the blind names **inside the shipped verifier**:
-
-| Tree | INC-15 result |
-|---|---|
-| repaired (as shipped) | **8/8, exit 0** |
-| **shipped discovery regressed to blind names** | **5/8 — G1, G2, G5 FAIL** ✅ the gates catch it |
-| restored | **8/8, exit 0** |
-
-This also closes a real review finding: the gates now drive the **deployed** lookup function, so they would go red if the shipped discovery regressed — rather than validating a private copy of the fix and passing regardless.
-
-### Cross-fleet re-confirmation — the 3 billing defects are STILL LIVE on `main`
-
-Executed against deployed source, now that the gates finally run:
-
-| Gate | Re-confirmation |
-|---|---|
-| **G6a** | **INC-6** — $300 order / one $10 eligible item → **charges $255.00**; item price ignored entirely |
-| **G6b** | **INC-5** — one malformed record → `KeyError`, **whole `/v1/usage` batch dies** |
-| **G6c** | **INC-8** — `{'model': None, 'tokens': 10}` → `{'per_model': {None: 10}, 'grand_total': 10}`, **no error raised** |
-
-### Full fleet gate surface — green, and non-vacuous (real test counts)
-
-| Repo / verifier | Result |
-|---|---|
-| `checkout-api` — `npm test` | **10 pass / 0 fail** |
-| `checkout-api` — INC-9 verifier (strict) | **9/9, exit 0** |
-| `checkout-api` — INC-12 verifier | **6/6, exit 0** |
-| `checkout-api` — **INC-15 verifier (new)** | **8/8, exit 0** |
-| `fabric-gateway-demo` — suite | **16 tests, OK** |
-| `fabric-gateway-demo` — INC-5 / INC-8 / INC-10 verifiers | exit 0 · exit 0 · exit 0 |
-| `fabric-ic-incident-target` — suite | **10 tests, OK** |
-| `fabric-ic-incident-target` — checkout gate | **3/3, exit 0** |
-
-**36 tests + 7 verifiers, zero failures.** All three production sources hash-match their deployed revisions.
+**Not permanently red, and not a padlock.** The gate is green in the very job that runs it, stays green when owners do the right thing, and stays green when the repo is legitimately edited — while still rejecting the broken repairs (G4).
 
 ---
 
-## 7. Owner runbooks — the work only you can do
+## 5. Fleet re-verification after this change
 
-### INC-6 · checkout revenue leak → **Gateway / checkout revenue owner**
+| Repo | Suite | Verifiers |
+|---|---|---|
+| `checkout-api` | **10 pass / 0 fail** | INC-9 **9/9** · INC-12 **6/6** · INC-15 **9/9** · **INC-18 6/6** |
+| `fabric-gateway-demo` | **Ran 16 tests, OK** | INC-5 · INC-8 · INC-10 — all exit 0 |
+| `fabric-ic-incident-target` | **Ran 10 tests, OK** | checkout gate exit 0 |
 
-1. **Quantify exposure first.** Query completed orders where the **eligible-item count is low but the order subtotal is high** — those are the over-discounted ones. The leak is largest at `n=1`; start there. This determines whether this is a rounding nuisance or a material revenue problem. **The commander cannot do this — it requires order data.**
-2. **Consider a temporary tier ceiling** (or disable volume discounts on orders with fewer than N eligible items). A config/feature-flag action that stops the bleeding without resolving the policy question.
-3. **Do NOT "fix the average" by dividing by the whole cart's item count.** That silently changes which orders qualify for a discount. It looks like a bug fix and is not one.
-4. **Answer the two questions** — the price field name, and the discount scope — and the guarded patch can be written and gated.
-
-### INC-5/3 + INC-8 · `/v1/usage` billing → **Gateway / billing owner**
-
-1. **Decide the malformed-record contract ONCE, covering BOTH cases:** a **missing** `model`/`tokens` key, *and* a **null-valued** one. Answering only the first leaves the second live in production.
-2. **Check whether `None` buckets already exist** in any stored per-model aggregate or invoice breakdown since the 2026-07-11 deploy (PR #1, commit `e368005`). This tells you whether mis-attribution has already reached billing data.
-3. **Fix the producer too.** A null model reaching the aggregator means an upstream emitter is already writing it. Patching only the consumer masks the source.
-4. **Add a validation boundary at ingest** so the aggregator can assume well-formed input.
-5. **Reconcile** any usage rows dropped or mis-attributed since that deploy.
-
-### Process · **PR hygiene** — DONE this run
-
-PRs **#11** and **#13** were duplicate diagnoses of INC-15 that never merged. Both are now **closed as superseded** by **#14**, which is CI-green against current `main`. Merging #14 lands the repair; leaving duplicates open is what invited each successive run to file another.
-
-### Restore observability (blocks every future run)
-
-The commander is currently **blind to production**. Provision a Sentry token, an OTEL endpoint, and a gateway log source. Until then, every run can only reason about code it can execute — and **no incident brief can bound customer impact.**
+**36 tests + 8 verifiers, zero failures.** No test assertion was weakened. No dependency was added.
 
 ---
 
-## 8. Coverage gap — stated once more, plainly
+## 6. Provenance metadata
 
-**No telemetry was reachable this run.** Sentry answered but unauthenticated; no OTEL collector on any standard port; no gateway logs on disk. Only the GitHub REST connector was live.
+| Source | Full sha256 | State |
+|---|---|---|
+| `checkout-api/service/checkout/session.js` | `b45a8eeceaa142dd70aea4182930d02edb2d23ce90f0f02527910abb5f18d7e8` | unchanged · INC-1 repaired + guarded |
+| `fabric-gateway-demo/service/usage_aggregator.py` | `bb21e50f7b5dab4463b71984bbe86a5df2b6ba442ffeff84d9b70815781750e5` | unchanged · INC-5 / INC-8 **live** |
+| `fabric-ic-incident-target/checkout.py` | `da2a02fd87aec668467114e0bc30ff7c2fe7fd3d8f105f5f156361b9c87c5c5e` | unchanged · INC-6 **live** |
 
-Every claim in this brief was established by **executing the deployed source**. The four incidents are real and live. **Their blast radius is UNKNOWN and deliberately not estimated** — §7 lists the owner queries that would bound it.
+- **Evidence basis:** execution of the deployed source (no telemetry reachable — see §2).
+- **Files changed this run:** `artifacts/incident/verify_inc9_ci_gate.py` (G6a/b/c repaired), `artifacts/incident/verify_inc18_gate_punishes_remediation.py` (new), `.github/workflows/ci.yml` (runs the new gate), `incident_brief.md`.
+- **Production code changed:** **none.** The three sources above are byte-identical to their deployed revisions as of this run. Note that this is *reported*, not *enforced* — G6 never fails on drift, precisely so that an owner repairing a billing source cannot be punished by our own gate.
+- **Not a duplicate:** PR #19 (INC-17) is still open and repairs a *different* file's hardcoded count (`verify_inc15_cross_fleet_discovery.py`). This finding is in `verify_inc9_ci_gate.py` and is a distinct defect.
 
 ---
 
-*Fabric autonomous incident commander · run 2026-07-11 · INC-15 patched & verified · INC-6 / INC-5 / INC-8 re-confirmed live and routed to owners.*
+## 7. Owner actions — what only you can do
+
+### 7a. Bound the blast radius (the commander cannot — it has no telemetry)
+
+1. **INC-6 exposure:** query completed orders where the **eligible-item count is low but the order subtotal is high** — those are the over-discounted ones. The leak is largest at `n=1`, so start there. This tells you whether this is a rounding-error problem or a **material revenue problem**.
+2. **INC-8 exposure:** check whether **`None` buckets already exist** in any stored per-model aggregate or invoice breakdown since the 2026-07-11 deploy (PR #1, commit `e368005`). This reveals whether mis-attribution has already reached billing data.
+3. **INC-5 exposure:** check `/v1/usage` for dropped batches since that same deploy, and **reconcile** anything lost.
+
+### 7b. Decide the two policy questions (this unblocks the patches)
+
+- **INC-6** — `fabric-ic-incident-target#6`: *(i)* What is the per-item price field named? *(ii)* Does the discount apply to the **eligible subtotal** or the **whole order**?
+- **INC-5 + INC-8 (ONE decision)** — `fabric-gateway-demo#2`, `fabric-gateway-demo#5`: what is the malformed-usage-record contract, covering **both** a **missing** key *and* a **null-valued** key? The options and their billing consequences:
+  - **reject loudly** — safest for invoice integrity; costs `/v1/usage` availability
+  - **skip + emit a metric** — preserves availability, but **under-bills silently** unless the alert is genuinely wired
+  - **attribute to `unknown`** — preserves totals, but **mis-attributes spend** and hides the producer bug
+
+### 7c. Interim mitigations (config / feature flags — **not** code, and therefore yours)
+
+- Consider a **temporary tier ceiling**, or disabling volume discounts on orders with fewer than *N* eligible items. This stops the INC-6 bleeding without resolving the policy question.
+- **Do not** "fix the average" by dividing by the whole cart's item count. That silently changes which orders qualify for a discount — it **looks** like a bug fix and is actually a **policy change**.
+- **Fix the producers too.** A malformed or null-model record reaching the aggregator means an upstream emitter is **already writing bad rows**. Patching only the consumer masks the source.
+
+---
+
+## 8. The systemic lesson
+
+Every incident in this fleet — INC-1 through INC-18 — reached production the same way: **a pull request changed a code path that no test executed.** The verifier layer now closes that hole in all three repos.
+
+But Cluster B is the deeper lesson, and it is about **us**, not the owners. Five times now, a gate written to catch a defect has itself frozen a merge-time fact into a permanent assertion. INC-18 is the most dangerous variant yet, because its expired precondition pointed **outward**: it would have punished the owners at the exact moment they finally did the right thing — and taught them that the commander's red CI is noise.
+
+**A gate must assert an invariant, never a date. If a check can only pass on the day it was written, it is not a gate — it is a timestamp with an exit code.**
+
+And the corollary, learned the hard way this run: **you cannot tell whether a gate has this bug by reading it. You have to run it against the future you claim to want.** Both self-inflicted instances of the bug in this very patch (the fatal sha256 gate, and the witness anchored to live production) survived careful review and were caught only by *simulating an owner landing the repair* and watching our own CI go red.
+
+---
+*Fabric autonomous incident commander · INC-18 · one verified verifier+CI patch shipped · three billing incidents routed to owners with runbooks · blast radius explicitly not estimated (no telemetry reachable).*

@@ -31,8 +31,14 @@ double witness, G4/G5:
       suite must go RED with the original production TypeError. If the guard
       cannot fail, it is worthless. THIS is the gate with teeth.
   G3b the verifier itself mutated nothing (sha256 before == after)
-  G6  the two live policy-blocked defects are STILL live on current HEAD
-      (we re-confirm rather than trusting a previous run's word)
+  G6  cross-fleet: the owner-blocked billing defects (INC-6/INC-5/INC-8) are
+      re-examined by EXECUTING the deployed sibling source. Their live/repaired
+      state is REPORTED as provenance, never asserted (INC-18): these gates used
+      to require the defects to be STILL BROKEN, which would have hard-reddened
+      CI the moment an owner landed the very repair we keep asking for. What is
+      ENFORCED instead is the policy-free baseline contract -- well-formed input
+      must still price and aggregate correctly -- which holds under every
+      candidate owner policy but fails on the tempting broken repairs.
 
 Run:  python3 artifacts/incident/verify_run.py
 Exit: 0 = every gate passed.
@@ -415,40 +421,165 @@ def main() -> int:
             )
         return _summary()
 
-    # Re-confirm the two policy-blocked defects are STILL live on current HEAD.
-    checkout = load(target, "checkout_live")
+    # Cross-fleet re-confirmation of the owner-blocked billing defects
+    # (INC-6 / INC-5 / INC-8) against the CURRENTLY DEPLOYED source.
+    #
+    # INC-18 REPAIR -- the expired-precondition bug, INVERTED.
+    #
+    # These three gates used to assert that the defects were STILL BROKEN:
+    #
+    #     leak == 25_500 and price_blind    <-- G6a
+    #     batch_died                        <-- G6b
+    #     silent_null                       <-- G6c
+    #
+    # Every one of those is a MERGE-TIME FACT FROZEN INTO A PERMANENT GATE. They
+    # encode "the billing defects are still unrepaired" -- true only for as long
+    # as nobody fixes them.
+    #
+    # The instant an owner lands the INC-6 / INC-5 / INC-8 repair that this
+    # commander has been ESCALATING FOR FOUR CONSECUTIVE RUNS, the assertion
+    # "the defect is still live" becomes false and checkout-api's CI goes hard
+    # RED -- on a repo where nothing is wrong, for the sole reason that somebody
+    # finally did the thing we kept asking them to do.
+    #
+    # A gate that PUNISHES THE REMEDIATION IT EXISTS TO REQUEST is worse than no
+    # gate at all. It is the INC-11 / INC-12 / INC-15 / INC-17 expired-
+    # precondition bug on its fifth repetition -- this time pointed at the
+    # owners rather than at ourselves.
+    #
+    # The invariant these gates actually exist to enforce is NOT "the defect is
+    # still there." It is:
+    #
+    #     whatever state the billing path is in, WELL-FORMED input must still be
+    #     handled correctly -- and the defect's current state must be reported
+    #     TRUTHFULLY as evidence for the brief.
+    #
+    # So liveness is now REPORTED (live / repaired), never ASSERTED, and the
+    # pass/fail decision rests on the policy-free baseline contract that no
+    # legitimate owner repair may break. This also keeps the commander from
+    # encoding the billing semantics it has repeatedly and deliberately refused
+    # to invent: every candidate policy (reject / skip / attribute-to-unknown,
+    # and either discount scope) satisfies these baselines, while the tempting
+    # BROKEN repairs do not.
+    # Load the deployed sibling sources. This is code an OWNER may have just
+    # edited, so the import itself must be guarded: if their in-progress repair
+    # has a syntax error or raises at module scope, an unguarded load here kills
+    # this verifier with a raw traceback and reddens CI. That is, once again, the
+    # INC-18 bug -- punishing the owner for touching the file we asked them to fix.
+    # An unloadable sibling is a thing to REPORT and SKIP, never to die on.
+    try:
+        checkout = load(target, "checkout_live")
+        agg = load(gateway, "agg_live")
+    except Exception as exc:  # noqa: BLE001 - a mid-edit sibling must not kill the gate
+        print()
+        skip(
+            "G6 cross-fleet re-confirmation (INC-6/5/8): SIBLING SOURCE UNLOADABLE",
+            f"a deployed sibling source could not be imported "
+            f"({type(exc).__name__}: {exc}). Reported as SKIPPED, never counted as a "
+            f"pass and never a hard failure: this is most likely an owner mid-repair, "
+            f"and a gate that dies on the owner's in-progress fix is the INC-18 defect "
+            f"itself. The sibling repo's OWN CI is what must catch a broken sibling.",
+        )
+        return _summary()
+
     leak = checkout.apply_discount(30_000, [{"price_cents": 1_000}])
     price_blind = checkout.apply_discount(30_000, [{"price_cents": 1}]) == checkout.apply_discount(
         30_000, [{"price_cents": 29_999}]
     )
+    inc6_live = leak == 25_500 and price_blind
+
+    # POLICY-FREE BASELINE (INC-6). Orders where the eligible items ARE the whole
+    # order, so the unresolved "discount scope" question cannot change the answer:
+    #   * the zero-item guard still holds, and
+    #   * the repo's own documented tier table still applies.
+    # Both hold on the deployed source AND under any correct repair. The tempting
+    # broken repair -- `.get('price_cents', 0)` against the wrong key -- reads
+    # every item as free, selects the 0% tier and charges $500.00 on the $425.00
+    # order, so it FAILS this baseline instead of sailing through.
+    inc6_baseline_ok = (
+        checkout.apply_discount(30_000, []) == 30_000  # zero-item guard: no items, no discount
+        and checkout.apply_discount(50_000, [{"price_cents": 10_000}] * 5) == 42_500  # avg $100 -> 15%
+        and checkout.apply_discount(1_000, [{"price_cents": 200}] * 5) == 1_000  # avg $2 -> 0%
+    )
     gate(
-        "G6a INC-6 checkout discount leak is STILL LIVE on main",
-        leak == 25_500 and price_blind,
-        f"$300 order / one $10 eligible item -> charges ${leak / 100:,.2f} "
-        f"(contract requires $300.00); item price ignored entirely={price_blind}",
+        "G6a INC-6 checkout: well-formed pricing contract holds (defect state REPORTED, not asserted)",
+        inc6_baseline_ok,
+        f"state={'STILL LIVE' if inc6_live else 'REPAIRED UPSTREAM'} — $300 order / one $10 eligible "
+        f"item -> charges ${leak / 100:,.2f} (contract requires $300.00); item price ignored "
+        f"entirely={price_blind}. Policy-free baseline (zero-item guard + documented tier table) "
+        f"intact={inc6_baseline_ok}",
     )
 
-    agg = load(gateway, "agg_live")
-    batch_died = False
+    # The malformed-record probe must survive EVERY candidate owner repair.
+    # Catching only KeyError would mean that an owner who fixes INC-5 by raising
+    # a custom ValidationError (a perfectly legitimate "reject loudly" policy --
+    # and the one safest for invoice integrity) would send an UNCAUGHT exception
+    # straight up through this verifier and CRASH it. That is the very bug this
+    # INC-18 repair exists to remove, one layer down: the probe itself must not
+    # punish the remediation. So we catch broadly and RECORD which exception the
+    # deployed source raised, rather than presuming it is still a KeyError.
     try:
         agg.aggregate_usage([{"model": "gpt-4o", "tokens": 120}, {"model": "gpt-4o"}])
-    except KeyError:
-        batch_died = True
+        batch_raised: str | None = None
+    except Exception as exc:  # noqa: BLE001 - any raise is a legitimate owner policy
+        batch_raised = type(exc).__name__
+    batch_died = batch_raised == "KeyError"  # the ORIGINAL INC-5 signature
 
-    # NEW this run: a null model does NOT raise — it silently aggregates billable
-    # tokens under a None key. A different, quieter failure than INC-3/INC-5.
-    null_model = agg.aggregate_usage([{"model": None, "tokens": 10}])
-    silent_null = None in null_model["per_model"]
+    # A null model does NOT raise on the deployed source -- it silently aggregates
+    # billable tokens under a None key (INC-8). A deliberate LOUD rejection is one
+    # of the valid owner policies, so an exception here is not a failure: it is a
+    # different reported state.
+    try:
+        null_model = agg.aggregate_usage([{"model": None, "tokens": 10}])
+        silent_null = None in null_model.get("per_model", {})
+    except Exception as exc:  # noqa: BLE001 - a loud rejection is a legitimate owner choice
+        null_model = f"raised {type(exc).__name__}"
+        silent_null = False
+
+    # POLICY-FREE BASELINE (INC-5 / INC-8): well-formed records must still
+    # aggregate correctly, per-model and in the grand total. This holds under
+    # EVERY candidate malformed-record policy, so it can never punish an owner
+    # for picking one -- but it DOES catch a repair that corrupts the happy path.
+    # This is the ONLY fatal condition for G6b/G6c.
+    well_formed = agg.aggregate_usage(
+        [
+            {"model": "gpt-4o", "tokens": 120},
+            {"model": "claude", "tokens": 30},
+            {"model": "gpt-4o", "tokens": 10},
+        ]
+    )
+    agg_baseline_ok = well_formed == {
+        "per_model": {"gpt-4o": 130, "claude": 30},
+        "grand_total": 160,
+    }
+
+    if batch_died:
+        inc5_state = "STILL LIVE — one malformed record raises KeyError and destroys the whole batch"
+    elif batch_raised:
+        inc5_state = (
+            f"REPAIRED UPSTREAM — the malformed record now raises {batch_raised} "
+            "(a deliberate reject-loudly policy), not the original unguarded KeyError"
+        )
+    else:
+        inc5_state = (
+            "REPAIRED UPSTREAM — the malformed record no longer kills the batch "
+            "(skip/default policy)"
+        )
     gate(
-        "G6b INC-5 /v1/usage batch failure is STILL LIVE on main",
-        batch_died,
-        "one malformed record raises KeyError and destroys the whole batch",
+        "G6b INC-5 /v1/usage: well-formed aggregation contract holds (defect state REPORTED, not asserted)",
+        agg_baseline_ok,
+        f"state={inc5_state}. Well-formed baseline intact={agg_baseline_ok}",
     )
     gate(
-        "G6c INC-8 (NEW) null model silently mis-attributes billable tokens",
-        silent_null,
-        f"{{'model': None, 'tokens': 10}} -> {null_model} — no error raised; "
-        "10 billable tokens booked against a None model key",
+        "G6c INC-8 null model: well-formed aggregation contract holds (defect state REPORTED, not asserted)",
+        agg_baseline_ok,
+        f"state={'STILL LIVE' if silent_null else 'REPAIRED UPSTREAM'} — "
+        f"{{'model': None, 'tokens': 10}} -> {null_model}"
+        + (
+            " — no error raised; 10 billable tokens booked against a None model key"
+            if silent_null
+            else ""
+        ),
     )
 
     # ------------------------------------------------------------ summary --
