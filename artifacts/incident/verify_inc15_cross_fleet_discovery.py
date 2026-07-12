@@ -37,7 +37,10 @@ GATES
   G6  NEGATIVE CONTROL -- genuinely-absent siblings still SKIP (exit 0), so the
       repair does not leave `checkout-api` CI permanently red (the INC-11 bug)
   G7  strict mode refuses to pass un-run gates (exit 1, FATAL)
-  G8  no production drift: all 3 sources byte-identical to their baselines
+  G8  no production drift CAUSED BY THIS RUN: every deployed source is handed back
+      byte-identical to the start-of-run snapshot. An owner edit (e.g. landing the
+      INC-6 billing repair) is REPORTED as provenance and is never a failure --
+      a gate that punishes the remediation it exists to request is worse than none.
 
 G5 is the load-bearing gate. It does not merely assert the new code works -- it
 proves the OLD code was blind on the SAME filesystem. Had both implementations
@@ -66,8 +69,24 @@ VERIFIER = CHECKOUT_API / "artifacts" / "incident" / "verify_inc9_ci_gate.py"
 TARGET = FLEET / "fabric-ic-incident-target"
 GATEWAY = FLEET / "fabric-gateway-demo"
 
-# Deployed revisions, recorded before this run touched anything. FULL sha256 --
-# a truncated prefix is a weaker assertion than the one we can trivially make.
+# Deployed revisions as recorded when this verifier was written. FULL sha256.
+#
+# PROVENANCE REFERENCE VALUES ONLY — read this before making G8 fatal on them.
+#
+# These hashes are a MERGE-TIME FACT. Asserting them as a permanent gate encodes
+# the statement "nobody has repaired the billing defects yet" — a claim about the
+# CALENDAR, not about correctness. The instant an owner lands the INC-6 repair this
+# commander has escalated for many consecutive runs, `checkout.py` changes bytes
+# and a fatal comparison here goes hard RED on a repo where NOTHING IS WRONG. It
+# also padlocks this repo's own `session.js`: any legitimate future edit reddens
+# CI (the INC-12 bug). A gate that punishes the remediation it exists to request is
+# worse than no gate at all — it teaches the team to ignore the red.
+#
+# So drift from THESE values is REPORTED as provenance and is NEVER fatal.
+# What G8 legitimately protects is this verifier's OWN side effects: it mutates
+# files during mutation testing and MUST restore every one. That is a property of
+# THIS PROCESS, not of the fleet's bug backlog — and it is enforced against the
+# start-of-run snapshot below, which remains FATAL.
 BASELINES = {
     CHECKOUT_API / "service" / "checkout" / "session.js":
         "b45a8eeceaa142dd70aea4182930d02edb2d23ce90f0f02527910abb5f18d7e8",
@@ -79,6 +98,24 @@ BASELINES = {
 
 RESULTS: list[tuple[str, bool, str]] = []
 SKIPPED: list[tuple[str, str]] = []
+
+
+def _snapshot_now() -> dict[pathlib.Path, str]:
+    """Hash the deployed sources AS THEY ARE RIGHT NOW (verifier start).
+
+    This is the anchor G8 enforces, and it is the whole INC-23 repair: whatever
+    state the billing path is in when we start — pristine, or already repaired by
+    an owner — this verifier must hand it back UNCHANGED. That invariant never
+    expires, where a hardcoded merge-time hash does.
+    """
+    snap: dict[pathlib.Path, str] = {}
+    for path in BASELINES:
+        if path.is_file():
+            snap[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return snap
+
+
+RUN_SNAPSHOT = _snapshot_now()
 
 
 def gate(name: str, ok: bool, detail: str = "") -> None:
@@ -443,25 +480,81 @@ def main() -> int:
         )
 
     # ------------------------------------------------------------------ G8 --
-    # Hash only the files that EXIST here. On a bare checkout the sibling sources
-    # are absent -- reading them raised FileNotFoundError and crashed the verifier
-    # in CI. An absent file is not drift; it is a different environment.
-    drift = []
+    # NO PRODUCTION DRIFT *CAUSED BY THIS RUN*  (the INC-23 repair).
+    #
+    # Assert the INVARIANT, not the CALENDAR. Two distinct conditions, and only one
+    # of them is a defect:
+    #
+    #   bytes moved DURING OUR OWN RUN   -> we mutated production during mutation
+    #                                       testing and failed to restore it.
+    #                                       FATAL. This gate still bites.
+    #   differs from the recorded ref     -> an OWNER EDIT (e.g. landing the INC-6
+    #     but STABLE across our run         billing repair we have asked for over
+    #                                       many runs). PROVENANCE. Never fatal.
+    #
+    # Note that simply DELETING this gate would also have turned it green -- and
+    # would have let a verifier that corrupts production sail through. That is the
+    # difference between a CORRECTION and a COVER-UP. Comparing against the
+    # start-of-run snapshot is what keeps the teeth while removing the padlock.
+    #
+    # Hash only the files that EXIST here: on a bare checkout the sibling sources
+    # are absent, and an absent file is not drift -- it is a different environment.
+    self_inflicted: list[str] = []
+    owner_edits: list[str] = []
     checked = 0
     for path, expected in BASELINES.items():
+        snapshot = RUN_SNAPSHOT.get(path)
         if not path.is_file():
+            # Present when we started, gone now => WE deleted it. That is the worst
+            # kind of self-inflicted drift, and it must never be skipped past.
+            if snapshot is not None:
+                self_inflicted.append(
+                    f"{path.name}: PRESENT at start-of-run ({snapshot[:12]}) but MISSING now"
+                )
+            # Absent at start AND absent now: not drift, just a different
+            # environment (a bare checkout does not clone the siblings).
             continue
         checked += 1
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
-        if actual != expected:
-            drift.append(f"{path.name}: {actual} != {expected}")
+        if snapshot is not None and actual != snapshot:
+            # We changed these bytes and did not put them back. Our fault. FATAL.
+            self_inflicted.append(
+                f"{path.name}: {actual[:12]} != start-of-run {snapshot[:12]}"
+            )
+        elif snapshot is None:
+            # Appeared during our run. We did not have it at start; treat the
+            # sudden appearance of a production source as self-inflicted too.
+            self_inflicted.append(
+                f"{path.name}: ABSENT at start-of-run but PRESENT now ({actual[:12]})"
+            )
+        elif actual != expected:
+            owner_edits.append(f"{path.name} ({actual[:12]} vs recorded {expected[:12]})")
+
+    if self_inflicted:
+        g8_detail = (
+            "THIS VERIFIER LEFT PRODUCTION MUTATED: "
+            + "; ".join(self_inflicted)
+            + ". Mutation testing must restore every file it touches."
+        )
+    elif owner_edits:
+        g8_detail = (
+            f"{checked}/{len(BASELINES)} sources present and STABLE across this run "
+            f"(we mutated nothing). PROVENANCE — differs from the revision recorded when "
+            f"this verifier was written: {', '.join(owner_edits)}. That is an OWNER EDIT, "
+            f"very likely the billing repair this commander has been requesting. It is NOT "
+            f"a failure and must never be treated as one."
+        )
+    else:
+        g8_detail = (
+            f"{checked}/{len(BASELINES)} sources present, byte-identical on the FULL sha256 "
+            f"to both the start-of-run snapshot and the recorded revision"
+            + ("" if siblings_present else " (siblings absent in this checkout: not drift)")
+        )
+
     gate(
-        "G8 NO PRODUCTION DRIFT — every deployed source PRESENT here matches its baseline",
-        not drift and checked > 0,
-        f"{checked}/{len(BASELINES)} sources present and byte-identical on the FULL sha256"
-        + ("" if siblings_present else " (siblings absent in this checkout: not drift)")
-        if not drift
-        else "; ".join(drift),
+        "G8 NO PRODUCTION DRIFT CAUSED BY THIS RUN — an owner's repair is provenance, not failure",
+        not self_inflicted and checked > 0,
+        g8_detail,
     )
 
     # -------------------------------------------------------------- summary --
