@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import subprocess
@@ -331,11 +332,47 @@ def write_pair(directory, checkout_src, agg_src, tag):
     return load(c, "co_" + tag), load(a, "ag_" + tag)
 
 
+# --------------------------------------------------------------- INC-29 --
+# SHIPPED IN THIS REPO. This is the file checkout-api CI audits and runs, and the
+# file whose spawn verify_inc29_strict_mode_leak_in_missed_verifiers.py G0 checks.
+#
+# INC-28's rule, applied to a file it missed: an intent must be PASSED to the
+# child that should receive it, never INHERITED by a child that must not.
+#
+# G1 below spawns verify_inc9_ci_gate.py and asks "does it pass as shipped?". In a
+# BARE CHECKOUT -- exactly what this repo's CI clones -- INC-9 has no siblings, so
+# it correctly SKIPs its cross-fleet gates and exits 0. But if an operator or CI
+# job exports FABRIC_REQUIRE_CROSS_FLEET, the child INHERITS it, is forced into
+# strict mode, and hard-fails for want of siblings that are legitimately absent.
+# G1 then reports "INC-9 does not pass" -- false, and unrelated to what G1 tests.
+#
+# Measured with the INC-28 repair applied, bare checkout, on the SAME tree:
+#     argv strict -> exit 0      env strict -> exit 1 (5/6)
+# A verdict that depends on HOW strict mode was requested is not a verdict.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool | None = None) -> dict:
+    """Environment for a spawned child verifier, with the strict intent explicit.
+
+    ALWAYS scrubs the strict-cross-fleet flag from the inherited environment, and
+    re-sets it ONLY when a call site explicitly asks. Stops the flag LEAKING
+    without removing the feature.
+    """
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
+
 def main():
     print("Fabric incident commander -- INC-18 verification gates")
     print("(the cross-fleet gates asserted the billing defects were STILL BROKEN)\n")
 
     # ------------------------------------------------------------------ G1 --
+    # env= is load-bearing: see child_env(). The child must not inherit an ambient
+    # strict-mode flag that would fail it for want of siblings CI never clones.
     inc9 = CHECKOUT_API / "artifacts" / "incident" / "verify_inc9_ci_gate.py"
     shipped = subprocess.run(
         [sys.executable, str(inc9)],
@@ -343,6 +380,7 @@ def main():
         capture_output=True,
         text=True,
         timeout=600,
+        env=child_env(),
     )
     blob = shipped.stdout + shipped.stderr
     ran_cross_fleet = "G6a" in blob

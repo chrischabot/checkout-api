@@ -57,6 +57,7 @@ Exit 0 = every gate passed.
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import re
 import shutil
@@ -155,6 +156,43 @@ GUARD_TEST_RE = re.compile(
 DEFECT = "const refreshToken = session.auth.refreshToken;"
 GUARDED = "const refreshToken = session.auth && session.auth.refreshToken;"
 
+# --------------------------------------------------------------- INC-29 --
+# SHIPPED IN THIS REPO. This is the file checkout-api CI audits and runs, and the
+# file whose spawns verify_inc29_strict_mode_leak_in_missed_verifiers.py G0 checks.
+#
+# INC-28 established the rule: an intent must be PASSED to the child that should
+# receive it, never INHERITED by a child that must not. It scrubbed the strict
+# flag in verify_inc15/inc19/inc23 -- but NOT here, and this file spawns
+# verify_inc9_ci_gate.py as a child in G1 (and again in the G5 simulation).
+#
+# G1 asks one question: "does the shipped INC-9 verifier pass on the current
+# tree?" In a BARE CHECKOUT -- exactly what this repo's CI clones -- INC-9 has no
+# sibling repos, so it correctly SKIPs its cross-fleet gates and exits 0. But if
+# an operator or CI job exports FABRIC_REQUIRE_CROSS_FLEET, the child INHERITS it,
+# is forced into strict mode, and hard-fails for want of siblings that are
+# legitimately absent. G1 then reports "INC-9 does not pass" -- a statement that
+# is FALSE, and that has nothing to do with the property G1 tests.
+#
+# Measured with the INC-28 repair applied, bare checkout, on the SAME tree:
+#     argv strict -> exit 0      env strict -> exit 1 (5/6)
+# A verdict that depends on HOW strict mode was requested is not a verdict.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool | None = None) -> dict:
+    """Environment for a spawned child verifier, with the strict intent explicit.
+
+    The strict-cross-fleet flag is ALWAYS removed from the inherited environment
+    and re-set ONLY when a call site explicitly asks for it. This stops the flag
+    LEAKING; it does not remove the feature -- a caller that wants strict mode in
+    a child still gets it by passing strict=True.
+    """
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
 
 def main() -> int:
     print("Fabric incident commander -- INC-12 verification gates\n")
@@ -164,12 +202,16 @@ def main() -> int:
     steps = ci_run_steps(ci_text)
 
     # ------------------------------------------------------------------ G1 --
+    # env= is load-bearing: see child_env(). G1 asks whether INC-9 passes on this
+    # tree, so the child must NOT inherit an ambient strict-mode flag that would
+    # make it fail for want of siblings CI never clones.
     inc9 = subprocess.run(
         [sys.executable, str(INC9)],
         cwd=str(REPO),
         capture_output=True,
         text=True,
         timeout=600,
+        env=child_env(),
     )
     gate(
         "G1 the merged INC-9 mutation-witness verifier passes on the current tree",
@@ -254,6 +296,7 @@ def main() -> int:
             capture_output=True,
             text=True,
             timeout=600,
+            env=child_env(),
         )
         vblob = new_ci_verifier.stdout + new_ci_verifier.stderr
 

@@ -63,6 +63,7 @@ Exit: 0 = every executed gate passed.
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import re
 import shutil
@@ -132,9 +133,42 @@ def siblings_here():
     return None, None
 
 
-def run(cwd: pathlib.Path, rel: str, *args: str):
+# INC-28 REPAIR -- the strict intent must be PASSED, never INHERITED.
+#
+# Nearly every gate below spawns a CHILD verifier. Several of those children are
+# NEGATIVE CONTROLS: they run against a synthetic tree where the siblings are
+# deliberately absent, and they require the child to report SKIP and exit 0.
+#
+# subprocess.run() without env= hands the child the parent's WHOLE environment.
+# So an ambient FABRIC_REQUIRE_CROSS_FLEET=1 (set by an operator or a CI job that
+# wants strict cross-fleet checking) is inherited by the control child, forces it
+# into strict mode, and makes it HARD-FAIL where the control demands a SKIP. The
+# gate then reports a failure that has nothing to do with the property it tests.
+#
+# Measured before this repair, on a HEALTHY fleet: env var set -> INC-19 2/7,
+# exit 1. This verifier collapses hardest precisely because so many of its gates
+# spawn children. A negative control that inherits the very flag it is
+# controlling for is not a control.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool | None = None) -> dict:
+    """Environment for a spawned child verifier, with the strict intent explicit."""
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
+
+def run(cwd: pathlib.Path, rel: str, *args: str, strict: bool | None = None):
     p = subprocess.run(
-        [sys.executable, rel, *args], cwd=str(cwd), capture_output=True, text=True, timeout=900
+        [sys.executable, rel, *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=900,
+        env=child_env(strict=strict),
     )
     return p.returncode, p.stdout + p.stderr
 

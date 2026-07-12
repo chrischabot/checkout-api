@@ -61,6 +61,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import shutil
@@ -104,10 +105,39 @@ def sha(p: pathlib.Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
-def run(script: pathlib.Path, cwd: pathlib.Path) -> subprocess.CompletedProcess:
+# INC-28 REPAIR -- the strict intent must be PASSED, never INHERITED.
+#
+# The gates below spawn CHILD verifiers, some of them as NEGATIVE CONTROLS that
+# run against a tree with the siblings deliberately absent and require a SKIP +
+# exit 0. subprocess.run() without env= hands the child the parent's WHOLE
+# environment, so an ambient FABRIC_REQUIRE_CROSS_FLEET=1 is inherited, forces
+# the control child into strict mode, and turns its expected SKIP into a FATAL.
+#
+# Measured before this repair, on a HEALTHY fleet: env var set -> INC-23 5/8,
+# exit 1. The strict intent is therefore scrubbed from the child environment and
+# re-set only when a call site explicitly asks for it.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool | None = None) -> dict:
+    """Environment for a spawned child verifier, with the strict intent explicit."""
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
+
+
+def run(
+    script: pathlib.Path, cwd: pathlib.Path, strict: bool | None = None
+) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(script)], cwd=str(cwd),
-        capture_output=True, text=True, timeout=900,
+        [sys.executable, str(script)],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=900,
+        env=child_env(strict=strict),
     )
 
 
