@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import shutil
@@ -51,6 +52,50 @@ import urllib.error
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+# INC-16 REPAIR — the cross-fleet sibling names.
+#
+# G6 (below) used to look for sibling directories named exactly `incident-target`
+# and `gateway`. The fleet repos are actually named `fabric-ic-incident-target`
+# and `fabric-gateway-demo`, so the lookup NEVER matched -- in ANY environment,
+# including the commander workspace it was written for. G6 always took the SKIP
+# path, so G6a/G6b/G6c were unreachable dead code, and the skip path then
+# computed `passed == total` over only the gates that HAD run and returned 0 --
+# printing a confident "GATES: 6/6 passed" while a third of the verifier had
+# never executed.
+#
+# The fix ADDS the real names; it never replaces the legacy ones, so any other
+# checkout layout that used the old names keeps working.
+_TARGET_DIRS = ("fabric-ic-incident-target", "incident-target")
+_GATEWAY_DIRS = ("fabric-gateway-demo", "gateway")
+
+
+def _find(roots, dirnames, *relparts):
+    """First existing <root>/<dirname>/<relparts...> file, else None."""
+    for root in roots:
+        for dirname in dirnames:
+            cand = root.joinpath(dirname, *relparts)
+            if cand.is_file():
+                return cand
+    return None
+
+
+def _strict_cross_fleet() -> bool:
+    """Promote a missing sibling from SKIP to FATAL.
+
+    Off by default: `checkout-api` CI clones only this repo, so the siblings are
+    legitimately absent there and an unconditional failure would leave this
+    verifier PERMANENTLY RED in the very CI job that runs it -- which is exactly
+    the expired-precondition bug INC-11/INC-12 were raised to repair. A caller
+    that knows the siblings ought to be present opts in.
+    """
+    if "--require-cross-fleet" in sys.argv:
+        return True
+    return os.environ.get("FABRIC_REQUIRE_CROSS_FLEET", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 # This verifier must run BOTH from the commander workspace (where checkout-api is
 # a clone under fleet/) and from INSIDE the repo, where it ships as
@@ -74,11 +119,37 @@ GUARDED = "const refreshToken = session.auth && session.auth.refreshToken;"
 DEFECT = "const refreshToken = session.auth.refreshToken;"
 
 RESULTS: list[tuple[str, bool, str]] = []
+# INC-16: skips live in their OWN list. They are reported, and they are
+# structurally incapable of entering the pass tally *or the denominator*. A skip
+# laundered into a pass count is worse than a missing check: it actively asserts
+# coverage it does not have.
+SKIPPED: list[tuple[str, str]] = []
 
 
 def gate(name: str, ok: bool, detail: str = "") -> None:
     RESULTS.append((name, ok, detail))
     print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f"\n         {detail}" if detail else ""))
+
+
+def skip(name: str, detail: str = "") -> None:
+    SKIPPED.append((name, detail))
+    print(f"[SKIPPED] {name}" + (f"\n         {detail}" if detail else ""))
+
+
+def summarize() -> int:
+    passed = sum(1 for _, ok, _ in RESULTS if ok)
+    total = len(RESULTS)
+    print(f"\n{'=' * 74}")
+    print(f"GATES: {passed}/{total} passed" + (f" · {len(SKIPPED)} SKIPPED" if SKIPPED else ""))
+    for name, _ in SKIPPED:
+        print(f"  SKIPPED (NOT counted as a pass): {name}")
+    print("=" * 74)
+    if passed != total:
+        for name, ok, _ in RESULTS:
+            if not ok:
+                print(f"  FAILED: {name}")
+        return 1
+    return 0
 
 
 def npm_test(cwd: pathlib.Path) -> subprocess.CompletedProcess:
@@ -330,31 +401,35 @@ def main() -> int:
     # plausible sibling location; if they genuinely are not here, SKIP explicitly
     # rather than reporting a vacuous pass.
     _fleet_roots = [CHECKOUT_API.parent, ROOT / "fleet", ROOT]
-    target = next(
-        (p for p in (r / "incident-target" / "checkout.py" for r in _fleet_roots) if p.is_file()),
-        None,
-    )
-    gateway = next(
-        (
-            p
-            for p in (
-                r / "gateway" / "service" / "usage_aggregator.py" for r in _fleet_roots
-            )
-            if p.is_file()
-        ),
-        None,
-    )
+    target = _find(_fleet_roots, _TARGET_DIRS, "checkout.py")
+    gateway = _find(_fleet_roots, _GATEWAY_DIRS, "service", "usage_aggregator.py")
 
     if target is None or gateway is None:
-        print(
-            "\n[SKIP] G6 cross-fleet re-confirmation (INC-6/5/8): the other fleet\n"
-            "       repos are not present in this checkout. Run this verifier from\n"
-            "       the incident-commander workspace to execute those gates."
+        missing = ", ".join(
+            n for n, p in (("checkout target", target), ("gateway", gateway)) if p is None
         )
-        passed = sum(1 for _, ok, _ in RESULTS if ok)
-        total = len(RESULTS)
-        print(f"\n{'=' * 74}\nGATES: {passed}/{total} passed\n{'=' * 74}")
-        return 0 if passed == total else 1
+        detail = (
+            f"sibling repos not present in this checkout ({missing} not found). "
+            f"Searched {[d for d in _TARGET_DIRS]} / {[d for d in _GATEWAY_DIRS]} under "
+            f"{[str(r) for r in _fleet_roots]}."
+        )
+        if _strict_cross_fleet():
+            # Strict mode: the caller asserted the siblings ought to be here, so a
+            # missing sibling means the gates CANNOT run -- and un-run gates must
+            # never be reported as passing.
+            gate(
+                "G6 cross-fleet re-confirmation (INC-6/5/8) — REQUIRED but unavailable",
+                False,
+                detail + " FATAL: --require-cross-fleet / FABRIC_REQUIRE_CROSS_FLEET is set.",
+            )
+            return summarize()
+        skip(
+            "G6a/G6b/G6c cross-fleet re-confirmation (INC-6 / INC-5 / INC-8)",
+            detail
+            + " Reported as SKIPPED, never as a pass. Run from the incident-commander"
+            + " workspace (or pass --require-cross-fleet) to execute these gates.",
+        )
+        return summarize()
 
     # Re-confirm the two policy-blocked defects are STILL live on current HEAD.
     checkout = load(target, "checkout_live")
@@ -393,17 +468,11 @@ def main() -> int:
     )
 
     # ------------------------------------------------------------ summary --
-    passed = sum(1 for _, ok, _ in RESULTS if ok)
-    total = len(RESULTS)
-    print(f"\n{'=' * 74}\nGATES: {passed}/{total} passed\n{'=' * 74}")
-    if passed != total:
-        for name, ok, _ in RESULTS:
-            if not ok:
-                print(f"  FAILED: {name}")
-        return 1
-    print("All gates green. The CI patch is verified safe (production source")
-    print("untouched) and PROVEN to bite (mutation goes red).")
-    return 0
+    rc = summarize()
+    if rc == 0:
+        print("All gates green. The CI patch is verified safe (production source")
+        print("untouched) and PROVEN to bite (mutation goes red).")
+    return rc
 
 
 if __name__ == "__main__":

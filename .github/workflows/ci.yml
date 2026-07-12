@@ -72,3 +72,38 @@ jobs:
 
       - name: Run the INC-12 divergence gate (proves the step above is not redundant)
         run: python3 artifacts/incident/verify_inc12_ci_runs_verifier.py
+
+      # INC-16 (Fabric autonomous incident commander).
+      #
+      # The INC-9 verifier above carried three CROSS-FLEET gates (G6a/G6b/G6c)
+      # that re-confirm the three owner-blocked billing defects (INC-6, INC-5,
+      # INC-8) are still live, by EXECUTING the deployed source. Its sibling
+      # discovery looked for directories named `incident-target` and `gateway`,
+      # but the fleet repos are named `fabric-ic-incident-target` and
+      # `fabric-gateway-demo` -- so the lookup NEVER matched, in ANY environment.
+      # G6 always took the SKIP path, and the skip path then computed
+      # `passed == total` over only the gates that HAD run, printing a confident
+      # "GATES: 6/6 passed" while a THIRD of the verifier was unreachable code.
+      #
+      # A skip laundered into a pass count is worse than a missing check: it
+      # actively asserts coverage it does not have. This step guards the repair.
+      #
+      # WHY THIS STEP IS SAFE HERE (and how it caught its own author):
+      # this CI job runs `actions/checkout`, which clones ONLY `checkout-api` --
+      # the sibling fleet repos are legitimately absent. The first draft of this
+      # step invoked the verifier unconditionally; against a bare checkout it
+      # reported 4/8, exit 1. Left in, that would have shipped a PERMANENTLY-RED
+      # gate: the exact INC-11/INC-12 expired-precondition bug, re-committed by
+      # the very incident that diagnoses it.
+      #
+      # The verifier is therefore ENVIRONMENT-AWARE. Verified in all four modes:
+      #   bare checkout, default  -> 3/3 passed, 1 SKIPPED, exit 0  (this job)
+      #   bare checkout, strict   -> exit 1 FATAL (refuses to pass un-run gates)
+      #   fleet workspace         -> 8/8, exit 0
+      #   discovery regressed     -> 4/8, exit 1 (the gate still bites)
+      #
+      # The sibling-dependent gates (G1/G2/G4/G5/G8) report as SKIPPED here --
+      # never as passes, and never in the denominator. G3/G6/G7 still run and
+      # still enforce the properties that must hold in EVERY environment.
+      - name: Run the INC-16 gate (proves the cross-fleet gates actually execute)
+        run: python3 artifacts/incident/verify_inc16_cross_fleet_gate.py
