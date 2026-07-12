@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import subprocess
@@ -134,6 +135,29 @@ if GATEWAY is not None:
     BASELINES[GATEWAY] = "bb21e50f7b5dab4463b71984bbe86a5df2b6ba442ffeff84d9b70815781750e5"
 
 RESULTS = []
+
+# INC-31 -- STOP THE STRICT-MODE FLAG LEAKING INTO CHILDREN.
+#
+# `subprocess.run()` without `env=` hands the child the parent's ENTIRE
+# environment, and strict cross-fleet mode is honoured through an environment
+# variable. G1 below spawns verify_inc9_ci_gate.py to ask only "does the shipped
+# INC-9 verifier pass on this tree?" On a BARE CHECKOUT -- what this repo's CI
+# clones -- INC-9 legitimately SKIPs its cross-fleet gates and exits 0. With the
+# flag leaked in, the child is forced into strict mode and HARD-FAILS for want of
+# siblings that are legitimately absent.
+#
+# THE RULE: an intent must be PASSED to the child that should receive it,
+# never INHERITED by a child that must not.
+STRICT_ENV_VAR = "FABRIC_REQUIRE_CROSS_FLEET"
+
+
+def child_env(*, strict: bool = False) -> dict:
+    """A child environment with the strict flag ALWAYS scrubbed."""
+    env = dict(os.environ)
+    env.pop(STRICT_ENV_VAR, None)
+    if strict:
+        env[STRICT_ENV_VAR] = "1"
+    return env
 
 
 def gate(name, ok, detail=""):
@@ -343,6 +367,7 @@ def main():
         capture_output=True,
         text=True,
         timeout=600,
+        env=child_env(),
     )
     blob = shipped.stdout + shipped.stderr
     ran_cross_fleet = "G6a" in blob
