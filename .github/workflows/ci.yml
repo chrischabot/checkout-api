@@ -164,3 +164,38 @@ jobs:
       # present -- so this step cannot become the permanently-red INC-11 bug.
       - name: Run the INC-19 gate (witnesses must not depend on ambient layout or gate counts)
         run: python3 artifacts/incident/verify_inc19_layout_and_count_invariance.py
+
+      # ---------------------------------------------------------------- INC-21 --
+      # THE DRIFT GATE HARD-FAILED THE MOMENT AN OWNER REPAIRED A BILLING DEFECT.
+      #
+      # `verify_inc15_cross_fleet_discovery.py` G8 ("NO PRODUCTION DRIFT") required
+      # every deployed source to be byte-identical to a HARDCODED sha256 baseline.
+      # That is a merge-time fact frozen into a permanent gate: it encodes "nobody
+      # has fixed the billing defects yet" -- a statement about the CALENDAR.
+      #
+      # Reproduced by execution. Landing the CORRECT INC-6 repair (choose the tier
+      # from the eligible items' mean price; the $300 order goes from a leaking
+      # $255.00 to the contractual $300.00) turned the fleet RED:
+      #     verify_inc15... -> exit 1, [FAIL] G8   (8/9)
+      #     verify_inc19... -> exit 1, [FAIL] G1   (6/7)  <- G1 re-runs INC-15
+      # ONE ROOT CAUSE, TWO RED GATES. The owner does precisely the thing this
+      # commander has escalated for six consecutive runs, and CI goes hard RED on a
+      # repo where nothing is wrong. A gate that PUNISHES THE REMEDIATION IT EXISTS
+      # TO REQUEST is worse than no gate at all -- and this variant points OUTWARD,
+      # at the owners we keep asking to act.
+      #
+      # THE REPAIR: assert the invariant, not the calendar. What G8 legitimately
+      # protects is the verifier's OWN side effects (it mutates files during mutation
+      # testing and must restore them). So G8 now compares a START-OF-RUN SNAPSHOT
+      # against the bytes on disk at the end: bytes moved DURING OUR RUN are FATAL;
+      # bytes that differ from the historical baseline but sit STABLE across our run
+      # are an OWNER EDIT, reported as provenance and never fatal.
+      #
+      # SAFETY: no production source is touched. On this bare CI checkout the
+      # witness gates need the sibling sources, so they report SKIPPED (never a pass,
+      # never a hard failure) while the STATIC G0 gate still asserts the repair is
+      # present with no siblings required -- so this step cannot become the
+      # permanently-red INC-11 bug it diagnoses. Strip the repair and G0 goes RED
+      # here, in CI, on a bare checkout (verified: 1/1 exit 0 -> 0/1 exit 1).
+      - name: Run the INC-21 gate (a drift gate must never punish an owner's repair)
+        run: python3 artifacts/incident/verify_inc21_drift_gate_punishes_owner_fix.py

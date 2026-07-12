@@ -37,7 +37,11 @@ GATES
   G6  NEGATIVE CONTROL -- genuinely-absent siblings still SKIP (exit 0), so the
       repair does not leave `checkout-api` CI permanently red (the INC-11 bug)
   G7  strict mode refuses to pass un-run gates (exit 1, FATAL)
-  G8  no production drift: all 3 sources byte-identical to their baselines
+  G8  no drift CAUSED BY THIS RUN: every source this verifier mutated during
+      mutation testing was restored byte-for-byte. An owner edit (bytes that
+      differ from the frozen historical baseline but sit STABLE across our run --
+      e.g. someone finally landing the INC-6 repair) is REPORTED as provenance
+      and is NEVER fatal. See snapshot_sources.__doc__ (INC-21).
 
 G5 is the load-bearing gate. It does not merely assert the new code works -- it
 proves the OLD code was blind on the SAME filesystem. Had both implementations
@@ -190,9 +194,34 @@ def gates_that_ran(blob: str) -> set[str]:
     return {g for g in ("G6a", "G6b", "G6c") if re.search(rf"^\[(PASS|FAIL)\] {g} ", blob, re.M)}
 
 
+def snapshot_sources() -> dict[pathlib.Path, str]:
+    """Hash every deployed source PRESENT, at the START of this run.
+
+    THIS is what G8 legitimately protects. This verifier MUTATES production
+    files during mutation testing and must restore every one of them. That is a
+    property of THIS PROCESS -- not a statement about the fleet's bug backlog.
+
+    The frozen BASELINES constants are kept as PROVENANCE reference values only.
+    Comparing disk against a hardcoded merge-time hash and calling the difference
+    FATAL encodes "nobody has fixed the billing defects yet" -- a fact about the
+    CALENDAR. The instant an owner lands the INC-6 repair this commander has
+    escalated for six consecutive runs, such a gate goes RED on a repo where
+    nothing is wrong. A gate that punishes the remediation it exists to request
+    is worse than no gate at all.
+    """
+    return {
+        p: hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in BASELINES
+        if p.is_file()
+    }
+
+
 def main() -> int:
     print("Fabric incident commander — INC-15 verification gates\n")
     roots = [FLEET, CHECKOUT_API / "fleet", CHECKOUT_API, CHECKOUT_API.parent]
+
+    # Start-of-run snapshot -- taken BEFORE any gate mutates anything (G8).
+    START_SNAPSHOT = snapshot_sources()
 
     # Are the sibling fleet repos actually here? `checkout-api` CI clones ONLY
     # this repo, so on a bare checkout they legitimately are not -- and the gates
@@ -446,22 +475,48 @@ def main() -> int:
     # Hash only the files that EXIST here. On a bare checkout the sibling sources
     # are absent -- reading them raised FileNotFoundError and crashed the verifier
     # in CI. An absent file is not drift; it is a different environment.
-    drift = []
-    checked = 0
-    for path, expected in BASELINES.items():
-        if not path.is_file():
+    #
+    # TWO DIFFERENT QUESTIONS, and the pre-INC-21 gate conflated them:
+    #
+    #   1. Did OUR OWN RUN move bytes it failed to restore?  -> FATAL. Still bites.
+    #   2. Do the bytes differ from the frozen historical baseline, but sit STABLE
+    #      across our run?  -> that is an OWNER EDIT (e.g. finally repairing INC-6).
+    #      REPORTED as provenance. NEVER fatal.
+    end_snapshot = snapshot_sources()
+
+    self_inflicted = []          # (1) -- fatal
+    owner_edits = []             # (2) -- provenance only
+    for path, started_as in START_SNAPSHOT.items():
+        now = end_snapshot.get(path)
+        if now is None:
+            self_inflicted.append(f"{path.name}: DELETED during this run")
             continue
-        checked += 1
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
-        if actual != expected:
-            drift.append(f"{path.name}: {actual} != {expected}")
+        if now != started_as:
+            self_inflicted.append(
+                f"{path.name}: MUTATED ACROSS OUR OWN RUN — not restored "
+                f"({started_as[:16]} -> {now[:16]})"
+            )
+        elif now != BASELINES[path]:
+            owner_edits.append(
+                f"{path.name}: differs from the historical baseline but STABLE across "
+                f"our run = an OWNER EDIT, not drift we caused ({now[:16]} != "
+                f"{BASELINES[path][:16]})"
+            )
+
+    checked = len(START_SNAPSHOT)
+    detail = (
+        f"{checked}/{len(BASELINES)} sources present; none mutated across this run "
+        "(start-of-run snapshot == bytes on disk now, FULL sha256)"
+    )
+    if not siblings_present:
+        detail += " (siblings absent in this checkout: not drift)"
+    if owner_edits:
+        detail += "\n         PROVENANCE (never fatal): " + "; ".join(owner_edits)
     gate(
-        "G8 NO PRODUCTION DRIFT — every deployed source PRESENT here matches its baseline",
-        not drift and checked > 0,
-        f"{checked}/{len(BASELINES)} sources present and byte-identical on the FULL sha256"
-        + ("" if siblings_present else " (siblings absent in this checkout: not drift)")
-        if not drift
-        else "; ".join(drift),
+        "G8 NO DRIFT CAUSED BY THIS RUN — every source we touched was restored "
+        "byte-for-byte (an owner's repair is reported, never punished)",
+        not self_inflicted and checked > 0,
+        detail if not self_inflicted else "; ".join(self_inflicted),
     )
 
     # -------------------------------------------------------------- summary --
